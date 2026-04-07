@@ -2,7 +2,6 @@ mod datasets;
 
 use datasets::*;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::{u64, usize, vec};
 use toy_vector_db::{
     index::hnsw::HnswIndex,
     types::Id,

@@ -1,2 +1,4 @@
-This folder will contain design notes and architecture docs.
-EOF
+この電車は　中央線　中央特快　東京行きです。
+次は　新宿　新宿。
+お出口わ右側です。
+山手線　湘南新宿ライン　埼京線　小田急線　京王線　地下鉄丸ノ内線　都営地下鉄新宿線　都営地下鉄大江戸線は　お乗り換えです。

@@ -89,7 +89,7 @@ pub fn exact_top_k(base_vecs: &Vec<Vec<f32>>, query: &Vec<f32>, k: usize, metric
     // .clone() 虽然也能用，但对 Copy 类型来说是多余的
     top_k
 }
-
+//TODO: 以下建图代码由CODEX完成
 fn build_index(base_vecs: &[Vec<f32>]) -> HnswIndex {
     let mut index = HnswIndex::new_with_metric(TEST_METRIC);
 
@@ -100,11 +100,16 @@ fn build_index(base_vecs: &[Vec<f32>]) -> HnswIndex {
     index
 }
 
+//TODO: 以下测试由CODEX完成
+#[test]
 fn test_hnsw_in_sift1m(){
-    
-
-
-
+    let base_bytes = load_sift_bytes("data//sift1m//sift//sift_base.fvecs").unwrap();
+    let query_bytes = load_sift_bytes("data//sift1m//sift//sift_query.fvecs").unwrap();
+    let base_vecs = read_fvecs(&base_bytes, 10);
+    let query = read_fvecs(&query_bytes, 1)[0].clone();
+    let index = build_index(&base_vecs);
+    let expected = exact_top_k(&base_vecs, &query, 1, TEST_METRIC)[0].0;
+    assert_eq!(index.search_knn_v1(&query, 1, 10), vec![expected]);
 }
 
 

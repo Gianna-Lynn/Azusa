@@ -22,6 +22,7 @@ fn build_index_v1(nodes_data: Vec<(u64, Vec<f32>, usize)>) -> HnswIndex {
     index
 }
 
+// TODO: 此代码由AGENT完成
 fn expected_search_knn_v1_ids(case: &HnswTestCase) -> Vec<Id> {
     let mut scored_ids: Vec<(Id, f32)> = case
         .nodes_data
@@ -48,6 +49,7 @@ fn expected_search_knn_v1_ids(case: &HnswTestCase) -> Vec<Id> {
         .collect()
 }
 
+// TODO: 此代码由AGENT完成
 fn assert_search_knn_v1_case(case_name: &str, case: HnswTestCase) {
     let expected_result_ids = expected_search_knn_v1_ids(&case);
     let HnswTestCase {
@@ -66,7 +68,7 @@ fn assert_search_knn_v1_case(case_name: &str, case: HnswTestCase) {
         case_name, expected_result_ids, result_ids
     );
 }
-
+// TODO: 此代码由AGENT完成
 fn run_search_knn_v1_case(case_name: &str, case: HnswTestCase) -> Result<(), String> {
     let result = catch_unwind(AssertUnwindSafe(|| {
         assert_search_knn_v1_case(case_name, case);

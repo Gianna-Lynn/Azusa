@@ -5,7 +5,7 @@ use toy_vector_db::{
 };
 use super::datasets::HnswTestCase;
 
-const TEST_METRIC: Metric = Metric::L2;
+const TEST_METRIC: Metric = Metric::Cosine;
 
 
 
@@ -21,7 +21,7 @@ const TEST_METRIC: Metric = Metric::L2;
 /// v1 版本的构图 helper, 复制自hnsw_test_v1.rs
 /// 人为指定每个节点所在的层次.
 pub fn build_index_v1(nodes_data: Vec<(u64, Vec<f32>, usize)>, ef_construction: usize, m: usize, m_max: usize) -> HnswIndex {
-    let mut index = HnswIndex::new();
+    let mut index = HnswIndex::new_with_metric(TEST_METRIC);
     for (id, data, level) in nodes_data.iter() {
         index.insert_v1_fixed_level(*id, data.clone(), ef_construction, m, m_max, level);
     }

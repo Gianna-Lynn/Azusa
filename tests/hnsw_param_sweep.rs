@@ -1,14 +1,11 @@
 mod datasets;
-use std::hash::Hash;
-
 use datasets::*;
-
 use toy_vector_db::{
     index::hnsw::HnswIndex,
-    types::{Vector, Id},
-    distance::cosine_similarity
+    types::{Vector, Id, Metric},
+    distance::similarity
 };
-
+const TEST_METRIC: Metric = Metric::L2;
 
 
 // 参数说明:
@@ -35,9 +32,9 @@ fn build_index_v1(nodes_data: Vec<(u64, Vec<f32>, usize)>, ef_construction: usiz
 //     
 fn donotuse_ideal_answer_generator(index: &HnswIndex, query: &Vector, top_k: usize) -> Vec<Id>{
 
-    // 按暴力 cosine similarity 排序后的理想 id 列表
+    // 按暴力 similarity 排序后的理想 id 列表
     // - 遍历 case 的 nodes_data
-    // - 算 query 和每个点的 cosine similarity
+    // - 算 query 和每个点的 similarity
     // - 排序
     // - 取前 k
     // - 你必须给 tie 一个稳定规则，不然实验结果会漂
@@ -46,8 +43,8 @@ fn donotuse_ideal_answer_generator(index: &HnswIndex, query: &Vector, top_k: usi
 
     let mut nodes_vec = index.get_nodes().clone();
     nodes_vec.sort_by(|node1, node2|{
-        let score1 = cosine_similarity(query, node1.get_data());
-        let score2 = cosine_similarity(query, node2.get_data());
+        let score1 = similarity(query, node1.get_data(), TEST_METRIC);
+        let score2 = similarity(query, node2.get_data(), TEST_METRIC);
         match score2.partial_cmp(&score1).unwrap(){
             std::cmp::Ordering::Equal => node1.get_id().cmp(node2.get_id()),
             other => other,
@@ -63,9 +60,9 @@ fn donotuse_ideal_answer_generator(index: &HnswIndex, query: &Vector, top_k: usi
 
 
 fn ideal_answer_generator(case: &HnswTestCase, query: &Vector, top_k: usize) -> Vec<Id>{
-    // 按暴力 cosine similarity 排序后的理想 id 列表
+    // 按暴力 similarity 排序后的理想 id 列表
     // - 遍历 case 的 nodes_data
-    // - 算 query 和每个点的 cosine similarity
+    // - 算 query 和每个点的 similarity
     // - 排序
     // - 取前 k
     // - 你必须给 tie 一个稳定规则，不然实验结果会漂
@@ -77,8 +74,8 @@ fn ideal_answer_generator(case: &HnswTestCase, query: &Vector, top_k: usize) -> 
             // ],
     // note: 访问元组的第一个元素,需要用.1, 第二个元素.2
     nodes_data_vec.sort_by(|node1, node2|{
-        let score1 = cosine_similarity(query, &node1.1);
-        let score2 = cosine_similarity(query, &node2.1);
+        let score1 = similarity(query, &node1.1, TEST_METRIC);
+        let score2 = similarity(query, &node2.1, TEST_METRIC);
         match score2.partial_cmp(&score1).unwrap(){
             std::cmp::Ordering::Equal => node1.0.cmp(&node2.0),
             other => other,

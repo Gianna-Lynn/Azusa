@@ -4,7 +4,10 @@ use std::collections::HashSet;
 use std::f32::{INFINITY};
 
 use crate::distance;
-use crate::types::{Id, Vector};
+use crate::types::{Id, Metric, Vector};
+
+
+
 #[derive(Debug)]
 pub struct HnswIndex {
     nodes: Vec<HnswNode>, //保存当前图中所有节点
@@ -12,6 +15,7 @@ pub struct HnswIndex {
     entry_node_id: Option<Id>, //保存入口节点Id
     //max_level: u64
     index_max_level: usize, //保存图中最高层数
+    metric: Metric
 }
 #[derive(Debug, Clone)]
 pub struct HnswNode {
@@ -100,8 +104,23 @@ impl HnswIndex {
             nodes: Vec::new(),
             entry_node_id: None,
             index_max_level: 0,
+            metric: Metric::Cosine, //默认使用Cosine
         }
     }
+
+    pub fn new_with_metric(metric: Metric) -> Self {
+        Self {
+            nodes: Vec::new(),
+            entry_node_id: None,
+            index_max_level: 0,
+            metric,
+        }
+    }
+
+    pub fn compute_similarity(&self, a: &Vector, b:&Vector)->f32{
+        distance::similarity(a, b, self.metric)
+    }
+
     pub fn len(&self) -> usize {
         // return nodes.len(); // 不可以这么写,因为这个方法是面向当前对象的,必须有self
         return self.nodes.len();
@@ -132,7 +151,7 @@ impl HnswIndex {
             let mut max_idx: usize = 0;
             for (idx, old_node) in self.nodes.iter().enumerate() {
                 let temp_similarity =
-                    distance::cosine_similarity(old_node.get_data(), node_to_insert.get_data());
+                    self.compute_similarity(old_node.get_data(), node_to_insert.get_data());
                 if temp_similarity > max_similarity {
                     max_similarity = temp_similarity;
                     max_idx = idx;
@@ -244,13 +263,13 @@ impl HnswIndex {
             //     Some(search_id) =>{
             if let Some(node_to_search) = self.get_node_by_id(current_id) {
                 let mut max_similarity: f32 =
-                    distance::cosine_similarity(node_to_search.get_data(), query);
+                    self.compute_similarity(node_to_search.get_data(), query);
                 let mut max_idx: usize = 0;
                 let mut flag = 0;
                 for (idx, neighbor_id) in node_to_search.neighbors[0].iter().enumerate() {
                     if let Some(neighbor_node) = self.get_node_by_id(*neighbor_id) {
                         let temp_similarity =
-                            distance::cosine_similarity(neighbor_node.get_data(), query);
+                            self.compute_similarity(neighbor_node.get_data(), query);
                         if temp_similarity > max_similarity {
                             max_similarity = temp_similarity;
                             max_idx = idx;
@@ -284,7 +303,7 @@ impl HnswIndex {
 
         for elem_id in set {
             let elem_node = self.get_node_by_id(*elem_id).expect("elem_node不存在");
-            let temp_similarity = distance::cosine_similarity(elem_node.get_data(), query);
+            let temp_similarity = self.compute_similarity(elem_node.get_data(), query);
             if temp_similarity > max_similarity {
                 max_similarity = temp_similarity;
                 max_elem_id = Some(*elem_id);
@@ -299,7 +318,7 @@ impl HnswIndex {
 
         for elem_id in set {
             let elem_node = self.get_node_by_id(*elem_id).expect("elem_node不存在");
-            let temp_similarity = distance::cosine_similarity(elem_node.get_data(), query);
+            let temp_similarity = self.compute_similarity(elem_node.get_data(), query);
             if temp_similarity < min_similarity {
                 min_similarity = temp_similarity;
                 min_elem_id = Some(*elem_id);
@@ -363,9 +382,9 @@ impl HnswIndex {
             let c_node = self.get_node_by_id(c_id).expect("节点不存在");
             let mut f_node = self.get_node_by_id(f_id).expect("节点不存在");
 
-            // 逻辑:cosine_similarity的值: 两个向量距离越近, similarity的值越大.不要写反了.
-            if distance::cosine_similarity(&c_node.data, query)
-                < distance::cosine_similarity(&f_node.data, query)
+            // 逻辑:similarity的值: 两个向量距离越近, similarity的值越大.不要写反了.
+            if self.compute_similarity(&c_node.data, query)
+                < self.compute_similarity(&f_node.data, query)
             {
                 break;
             }
@@ -386,9 +405,9 @@ impl HnswIndex {
                 f_node = self.get_node_by_id(f_id).expect("节点不存在");
 
                 let e_node = self.get_node_by_id(e_id).expect("节点不存在");
-                // 逻辑:cosine_similarity的值: 两个向量距离越近, similarity的值越大.不要写反了.
-                if distance::cosine_similarity(&e_node.data, query)
-                    >= distance::cosine_similarity(&f_node.data, query)
+                // 逻辑:similarity的值: 两个向量距离越近, similarity的值越大.不要写反了.
+                if self.compute_similarity(&e_node.data, query)
+                    >= self.compute_similarity(&f_node.data, query)
                     || w_set.len() < ef
                 {
                     c_set.insert(e_id);
@@ -411,7 +430,7 @@ impl HnswIndex {
             .get_node_by_id(entry_id)
             .expect("未能根据entry_id检索到entry_node");
         let mut current_node_neighbors = &current_node.get_neighbors()[level];
-        let mut max_similarity = distance::cosine_similarity(current_node.get_data(), query);
+        let mut max_similarity = self.compute_similarity(current_node.get_data(), query);
         let mut max_similarity_id = entry_id;
         loop {
             for neighbor in current_node_neighbors {
@@ -419,7 +438,7 @@ impl HnswIndex {
                     .get_node_by_id(*neighbor)
                     .expect("未能检索到neighbor_node");
                 let neighbor_node_similarity =
-                    distance::cosine_similarity(neighbor_node.get_data(), query);
+                    self.compute_similarity(neighbor_node.get_data(), query);
                 if neighbor_node_similarity > max_similarity {
                     max_similarity = neighbor_node_similarity;
                     max_similarity_id = *neighbor_node.get_id();
@@ -464,8 +483,8 @@ impl HnswIndex {
         candidate_sequence.sort_by(|id1, id2| {
             let node_1 = self.get_node_by_id(*id1).expect("id1找不到节点");
             let node_2 = self.get_node_by_id(*id2).expect("id2找不到节点");
-            let score1 = distance::cosine_similarity(query, node_1.get_data());
-            let score2 = distance::cosine_similarity(query, node_2.get_data());
+            let score1 = self.compute_similarity(query, node_1.get_data());
+            let score2 = self.compute_similarity(query, node_2.get_data());
             // partial_cmp 只做一件事：比较两个数，返回 Less、Equal、Greater。
             match score2.partial_cmp(&score1).unwrap() {
                 // partical_cmp语句返回: score2 (  > / < / = ) score1
@@ -496,6 +515,7 @@ impl HnswIndex {
         query: &Vector,
         k: usize,
         ef_search: usize,
+
     ) -> Vec<Id> {
         let Some(mut current_entry_id) = entrance_id else {
             return Vec::new();
@@ -510,8 +530,8 @@ impl HnswIndex {
         candidate_sequence.sort_by(|id1, id2| {
             let node_1 = self.get_node_by_id(*id1).expect("id1找不到节点");
             let node_2 = self.get_node_by_id(*id2).expect("id2找不到节点");
-            let score1 = distance::cosine_similarity(query, node_1.get_data());
-            let score2 = distance::cosine_similarity(query, node_2.get_data());
+            let score1 = self.compute_similarity(query, node_1.get_data());
+            let score2 = self.compute_similarity(query, node_2.get_data());
             match score2.partial_cmp(&score1).unwrap() {
                 std::cmp::Ordering::Equal => id1.cmp(id2),
                 other => other,
@@ -848,8 +868,8 @@ impl HnswIndex {
         candidate_sequence.sort_by(|id1, id2| {
             let node_1 = self.get_node_by_id(*id1).expect("id1找不到节点");
             let node_2 = self.get_node_by_id(*id2).expect("id2找不到节点");
-            let score1 = distance::cosine_similarity(query, node_1.get_data());
-            let score2 = distance::cosine_similarity(query, node_2.get_data());
+            let score1 = self.compute_similarity(query, node_1.get_data());
+            let score2 = self.compute_similarity(query, node_2.get_data());
             // partial_cmp 只做一件事：比较两个数，返回 Less、Equal、Greater。
             match score2.partial_cmp(&score1).unwrap() {
                 // partical_cmp语句返回: scroe2 (  > / < / = ) score1

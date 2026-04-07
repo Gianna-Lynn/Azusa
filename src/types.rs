@@ -23,3 +23,12 @@ pub struct SearchResult {
     // SearchResult结构体包含一个id和一个score，
     // 分别表示搜索结果对应的记录id和相似度得分。
 }
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// PartialEq: 自动生成eq()和ne()方法, 允许使用==和!=
+// Eq: 是PartialEq的升级版本, 用在需要"完全相等"(满足反射性对称性传递性)的数据结构里,比如Hashmap
+pub enum Metric {
+    Cosine,
+    L2,
+}

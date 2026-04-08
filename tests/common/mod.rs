@@ -18,7 +18,7 @@ const TEST_METRIC: Metric = Metric::Cosine;
 // - m_max: 每层允许的最大邻居数. 在插入新节点时, 如果某个节点的邻居数超过m_max, 就需要进行邻居选择和替换.
     
 /// id: u64, data: Vec<f32>, lvl: usize
-/// v1 版本的构图 helper, 复制自hnsw_test_v1.rs
+/// v1 版本的构图 helper, 改进自hnsw_test_v1.rs, 建图的时候引入METRIC
 /// 人为指定每个节点所在的层次.
 pub fn build_index_v1(nodes_data: Vec<(u64, Vec<f32>, usize)>, ef_construction: usize, m: usize, m_max: usize) -> HnswIndex {
     let mut index = HnswIndex::new_with_metric(TEST_METRIC);

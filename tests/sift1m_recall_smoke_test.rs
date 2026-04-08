@@ -11,11 +11,12 @@
 
 mod sift1m_recall;
 
+use std::collections::HashSet;
+
 use crate::sift1m_recall::*;
+use serde_json::map::Keys;
 use toy_vector_db::{
-    distance::similarity,
-    index::hnsw::{HnswIndex, HnswNode},
-    types::Metric,
+    distance::similarity, index::hnsw::{HnswIndex, HnswNode}, search, types::{Id, Metric}
 };
 const TEST_METRIC: Metric = Metric::L2;
 
@@ -92,23 +93,77 @@ fn build_index(base_vecs: &[Vec<f32>]) -> HnswIndex {
 
 #[test]
 fn test_hnsw_in_sift1m(){
-    let limit: usize = 10;       // limit控制了我们从sift1m的文件里, 只读前多少条向量.
-    let ef_search = 7;    // ef_search控制了我们在hnsw里搜索的时候, 最多看多少个节点. 这个参数越大, 搜索效果越好, 但是搜索速度越慢.
+    let base_limit: usize = 50;         // base_limit控制了我们从sift1m的文件里, 只读前多少条向量.
+    let k = 5;               // k用来表达 "取得前几个最相似的结果."
+    let ef_search = 10;    // ef_search控制了我们在hnsw里搜索的时候, 最多看多少个节点. 这个参数越大, 搜索效果越好, 但是搜索速度越慢.
+    let query_limit = 5;
 
     let base_bytes = load_sift_bytes("data//sift1m//sift//sift_base.fvecs")
         .expect("in function test_hnsw_in_sift1m, load base_bytes error");
-    let base_vecs = read_fvecs(&base_bytes,limit);
+    let base_vecs = read_fvecs(&base_bytes,base_limit);
+    let index =  build_index(&base_vecs);
+
+    
     let query_bytes = load_sift_bytes("data//sift1m//sift//sift_query.fvecs")
         .expect("in function test_hnsw_in_sift1m, load query_bytes error");
-    let query_vecs = read_fvecs(&query_bytes,limit);
-    let query = query_vecs[0].clone();
-    let index =  build_index(&base_vecs);
-    let brute_force = exact_top_k(&base_vecs, &query, limit, TEST_METRIC);
-        //brute_force: Vec<(Id, score)> 
-    let search_result_ids = index.search_knn_v1(&query, limit, ef_search);
-        //search_result_ids: Vec<Id>
-    let brute_force_ids: Vec<_> = brute_force.iter().map(|(id,_)|   *id).collect();
-    assert_eq!(brute_force_ids[0], search_result_ids[0]);
-    println!("{:#?}", search_result_ids);
-    println!("{:#?}", brute_force_ids);
+    let query_vecs = read_fvecs(&query_bytes,query_limit);
+
+    let mut cnt = 0;
+    let mut total_recall_at_k:f32 = 0.0;
+    let mut total_exact_at_k = 0;
+    for query_vec in query_vecs{
+        println!("\n========== query[{}]  ==========", cnt);
+        cnt = cnt + 1;
+
+        let query = query_vec.clone();
+        
+        let brute_force = exact_top_k(&base_vecs, &query, k, TEST_METRIC);
+            //brute_force: Vec<(Id, score)> 
+        let search_result_ids = index.search_knn_v1(&query, k, ef_search);
+            //search_result_ids: Vec<Id>
+        let brute_force_ids: Vec<_> = brute_force.iter().map(|(id,_)|   *id).collect();
+        
+        // 测试top-1是否一致
+        assert_eq!(brute_force_ids[0], search_result_ids[0]);
+        // println!("{:#?}", search_result_ids);
+        // println!("{:#?}", brute_force_ids);
+
+        let brute_set: HashSet<_> = brute_force_ids.iter().copied().collect();
+        let overlap: Vec<_> = search_result_ids
+            .iter()
+            .copied()
+            .filter(|id| brute_set.contains(id))
+            .collect();
+        let overlap_num = overlap.len();
+
+        // 关于top-k中涉及到的两个指标:
+        // recall@k : 前k个命中了多少个. 不要求顺序一致, 只要求id部分或全部重合. 可以是一个计数值或者百分比分数.
+        // exact@k  : 前k个是否完全一致. 要求顺序一致, 要求id全部重合. 是一个布尔值.
+        
+        let recall_at_k = overlap_num as f32 / k as f32;    //如果不都声明成f32就会变成整数除法, 3/5=0
+        let exact_at_k = brute_force_ids.len() >= k
+                            && search_result_ids.len() >= k
+                            && &brute_force_ids[..k] == &search_result_ids[..k]; //把这一条放在最后, 否则会panic,因为这句话会直接去切片.
+        total_recall_at_k += recall_at_k;
+        // total_exact_at_k  += (exact_at_k == true)? 1 : 0; // Rust不支持? : 的语法
+        if exact_at_k{
+            total_exact_at_k += 1;
+        }
+
+        // for (id, score) in brute_force.iter() {
+        //     println!("id={}, score={}", id, score);
+        // }    
+        println!("recall@{} = {}", k, recall_at_k);
+        println!("exact@{} = {}", k, exact_at_k);
+
+    }
+
+
+    println!("---");
+    //println!("SUMMARY: ef_construction={}, m={}, m_max={}, ef_search={}", ef_construction, m, m_max, ef_search);
+    println!("  recall@{} = [{}/{}]", k , total_recall_at_k, cnt);
+    println!("  exact@{}  = [{}/{}]", k , total_exact_at_k, cnt);
+    println!("===\n");
+    
+
 }

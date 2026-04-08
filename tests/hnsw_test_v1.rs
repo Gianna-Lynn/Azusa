@@ -1,5 +1,6 @@
-mod datasets;
+// TODO: 此文件由AGENT完成
 
+mod datasets;
 use datasets::*;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use toy_vector_db::{
@@ -11,18 +12,16 @@ use toy_vector_db::{
 /// v1 版本的构图 helper
 fn build_index_v1(nodes_data: Vec<(u64, Vec<f32>, usize)>) -> HnswIndex {
     let mut index = HnswIndex::new();
-    let ef = 10;
+    let ef_construction = 10;
     let m = 2;
     let m_max = 4;
-
-    for (id, data, _) in nodes_data.iter() {
-        index.insert_v1(*id, data.clone(), ef, m, m_max);
+    for (id, data, level) in nodes_data.iter() {
+        index.insert_v1_fixed_level(*id, data.clone(), ef_construction, m, m_max, level);
     }
-
     index
 }
 
-// TODO: 此代码由AGENT完成
+
 fn expected_search_knn_v1_ids(case: &HnswTestCase) -> Vec<Id> {
     let mut scored_ids: Vec<(Id, f32)> = case
         .nodes_data
@@ -49,7 +48,6 @@ fn expected_search_knn_v1_ids(case: &HnswTestCase) -> Vec<Id> {
         .collect()
 }
 
-// TODO: 此代码由AGENT完成
 fn assert_search_knn_v1_case(case_name: &str, case: HnswTestCase) {
     let expected_result_ids = expected_search_knn_v1_ids(&case);
     let HnswTestCase {
@@ -68,7 +66,7 @@ fn assert_search_knn_v1_case(case_name: &str, case: HnswTestCase) {
         case_name, expected_result_ids, result_ids
     );
 }
-// TODO: 此代码由AGENT完成
+
 fn run_search_knn_v1_case(case_name: &str, case: HnswTestCase) -> Result<(), String> {
     let result = catch_unwind(AssertUnwindSafe(|| {
         assert_search_knn_v1_case(case_name, case);

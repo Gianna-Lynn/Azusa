@@ -604,7 +604,7 @@ impl HnswIndex {
         // 但由于新节点仅在 [0, new_node_level] 层出现，
         // 而 Phase 2 只在更高层运行，所以不会被意外访问。
         // Phase 3 中 search_layer_v0 虽然会看到新节点，但只用于"找邻居"而非搜索结果。
-        // TODO: 换一个方法, 不提前 push，改用临时邻居表 Phase 3 完成后，一次性完成插入.
+        // TODO: 可优化: 换一个方法, 不提前 push，改用临时邻居表 Phase 3 完成后，一次性完成插入.
 
         // *************************************** line 5, line 6, line 7  *************************************************//
         // 这是一个类似于坐电梯下楼的逻辑.在这一层楼上寻找离目的地最近的电梯,然后坐那个电梯下到下一层楼, 再在下一层楼上寻找离目的地最近的电梯, 以此类推, 直到坐到目的地所在的楼层为止.
@@ -663,7 +663,7 @@ impl HnswIndex {
             let w_set = self.search_layer_v0(&data, entry_point_id, current_lvl, ef_construction);
             
             /**************************************** line 10 从候选中选出最多 M 个邻居 **************************************************/
-            // TODO:
+            // TODO: 可优化: 引入启发式
             // simple方法按距离排序, 选出前M个. 但是如果候选集合中有很多距离相近的节点, 可能会导致选出的邻居过于集中, 从而影响搜索效率. 
             // 因此需要引入一些多样性启发式，避免所有边都指向一团特别近但很拥挤的点.
             let neighbors_set = &self.select_neighbors_simple(&w_set,&data,m);
@@ -749,12 +749,6 @@ impl HnswIndex {
                     for neighbor_to_delete_id in to_delete{
                         self.delete_neighbor_relationship_at_level(*e_id, neighbor_to_delete_id, current_lvl);
                     }
-
-                    // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-                    //TODO: 这里的更新只是单方面的, 也就是说我们更新了e_node的邻居表, 但是并没有更新那些被删掉的邻居节点的邻居表.
-                    //      这可能会导致图结构出现不一致, 例如某个节点A的邻居表中有节点B, 但是节点B的邻居表中没有节点A. 这种不一致可能会影响搜索效率, 因为搜索过程中可能会遇到一些"死胡同", 导致搜索无法继续下去.
-                    //      剪枝没剪干净.
-
                 }
             }//endfor
             /**************************************** 上面的line 12-16处理的都是剪枝逻辑,为方便理解可整块跳过 **************************************************/
@@ -765,10 +759,8 @@ impl HnswIndex {
 
             // debug: 理解有误.line 17的ep是一个局部变量, 不再代表"整个hnsw图的入口点"
             // self.entry_node_id = w_set.iter().next().copied();
-            // TODO: 这个地方伪代码直观上看是把一个集合赋值给了一个id.这显然是有待改进的.不过为了通过编译, 我们姑且先这么写吧.
-            // entry_point_id = w_set.iter().next().copied().expect("searchh_result_id赋值错误");
             
-            // 改进: 调用get_nearest函数来从w_set中选出一个最近的节点作为下一层的入口点.
+            // 调用get_nearest函数来从w_set中选出一个最近的节点作为下一层的入口点.
             entry_point_id = self.get_nearest(&w_set, &data).expect("searchh_result_id赋值错误");
         }
        

@@ -10,6 +10,7 @@
 // 拿结果和 sift_groundtruth 比较，计算recall@k（召回率）
 
 mod sift1m_recall;
+
 use crate::sift1m_recall::*;
 use toy_vector_db::{
     distance::similarity,
@@ -18,16 +19,6 @@ use toy_vector_db::{
 };
 const TEST_METRIC: Metric = Metric::L2;
 
-
-// mod datasets;
-// use datasets::*;
-// mod hnsw_param_sweep;
-// use crate::hnsw_param_sweep::*;
-// use std::{collections::HashSet, u64, usize, vec};
-// use toy_vector_db::{
-//     index::hnsw::{HnswIndex, HnswNode},
-//     types::Id,
-// };
 
 
 #[test]
@@ -40,6 +31,7 @@ pub fn sift1m_recall_smoke_test(){
     // println!("base_vecs is {:?}",base_vecs);
     // println!("base_vecs.len() is {}", base_vecs.len());  //==limit
     // println!("base_vecs[0].len() is {}", base_vecs[0].len()); //==128
+    
     // Vec<Vec<f32>> 没有实现 Display trait，只实现了 Debug trait。 
     // {} 不可行
     // {:?} — Debug 打印（单行）
@@ -65,8 +57,6 @@ pub fn sift1m_recall_smoke_test(){
     println!("top-{} results:{:?}", k, top_k);
     println!("hnsw-{} results:{:?}", k, search_result);
 
-
-
 }
 
 
@@ -89,7 +79,7 @@ pub fn exact_top_k(base_vecs: &Vec<Vec<f32>>, query: &Vec<f32>, k: usize, metric
     // .clone() 虽然也能用，但对 Copy 类型来说是多余的
     top_k
 }
-//TODO: 以下建图代码由CODEX完成
+// TODO: 以下建图代码由CODEX完成
 fn build_index(base_vecs: &[Vec<f32>]) -> HnswIndex {
     let mut index = HnswIndex::new_with_metric(TEST_METRIC);
 
@@ -100,17 +90,25 @@ fn build_index(base_vecs: &[Vec<f32>]) -> HnswIndex {
     index
 }
 
-//TODO: 以下测试由CODEX完成
 #[test]
 fn test_hnsw_in_sift1m(){
-    let base_bytes = load_sift_bytes("data//sift1m//sift//sift_base.fvecs").unwrap();
-    let query_bytes = load_sift_bytes("data//sift1m//sift//sift_query.fvecs").unwrap();
-    let base_vecs = read_fvecs(&base_bytes, 10);
-    let query = read_fvecs(&query_bytes, 1)[0].clone();
-    let index = build_index(&base_vecs);
-    let expected = exact_top_k(&base_vecs, &query, 1, TEST_METRIC)[0].0;
-    assert_eq!(index.search_knn_v1(&query, 1, 10), vec![expected]);
+    let limit: usize = 10;       // limit控制了我们从sift1m的文件里, 只读前多少条向量.
+    let ef_search = 7;    // ef_search控制了我们在hnsw里搜索的时候, 最多看多少个节点. 这个参数越大, 搜索效果越好, 但是搜索速度越慢.
+
+    let base_bytes = load_sift_bytes("data//sift1m//sift//sift_base.fvecs")
+        .expect("in function test_hnsw_in_sift1m, load base_bytes error");
+    let base_vecs = read_fvecs(&base_bytes,limit);
+    let query_bytes = load_sift_bytes("data//sift1m//sift//sift_query.fvecs")
+        .expect("in function test_hnsw_in_sift1m, load query_bytes error");
+    let query_vecs = read_fvecs(&query_bytes,limit);
+    let query = query_vecs[0].clone();
+    let index =  build_index(&base_vecs);
+    let brute_force = exact_top_k(&base_vecs, &query, limit, TEST_METRIC);
+        //brute_force: Vec<(Id, score)> 
+    let search_result_ids = index.search_knn_v1(&query, limit, ef_search);
+        //search_result_ids: Vec<Id>
+    let brute_force_ids: Vec<_> = brute_force.iter().map(|(id,_)|   *id).collect();
+    assert_eq!(brute_force_ids[0], search_result_ids[0]);
+    println!("{:#?}", search_result_ids);
+    println!("{:#?}", brute_force_ids);
 }
-
-
-

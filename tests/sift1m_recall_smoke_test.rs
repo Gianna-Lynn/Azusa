@@ -34,14 +34,19 @@ const SMOKE_TEST_PARAMS: &[Sift1mSweepParams] = &[
     (10, 5, 10, 5), // (limit, k, ef_search, query_limit)
 ];
 const HNSW_IN_SIFT1M_PARAMS: &[Sift1mSweepParams] = &[
-    (500, 5, 80, 5), // (base_limit, k, ef_search, query_limit)
     // 想做 sweep 的时候，继续往这里加 tuple 就行。
-    // (500, 5, 120, 5),
-    // (500, 5, 160, 5),
-    // (500, 5, 200, 5), 
+    // (base_limit, k, ef_search, query_limit)
+    // (200, 5, 40, 5), 
+    // (200, 5, 50, 5), 
+    // (200, 5, 80, 5), 
+
+    (500, 5, 80, 5),     
+    (500, 5, 120, 5),
+    (500, 5, 160, 5),
+    (500, 5, 200, 5), 
+
     // (1000, 5, 80, 5),
-    (1000, 5, 120, 10),
-    //  (10, 5, 10, 5),
+    // (1000, 5, 120, 10),
 ];
 
 
@@ -114,17 +119,25 @@ pub fn exact_top_k(base_vecs: &Vec<Vec<f32>>, query: &Vec<f32>, k: usize, metric
     // .clone() 虽然也能用，但对 Copy 类型来说是多余的
     top_k
 }
-// TODO: 以下建图代码由CODEX完成
+
 fn build_index(base_vecs: &[Vec<f32>]) -> HnswIndex {
     let mut index = HnswIndex::new_with_metric(TEST_METRIC);
+    // 这组参数比原来的 (10, 2, 4) 更宽松一点：
+    // - ef_construction 提高候选质量
+    // - m / m_max 增强图连通性
+    // 这样更适合先验证 insert_v1 的稳定性和 recall。
+    let ef_construction = 20;
+    let m = 4;
+    let m_max = 8;
 
     for (id, base_vec) in base_vecs.iter().enumerate() {
-        index.insert(HnswNode::new(id as u64, base_vec.clone(), 0));
+        // 认为每一条向量的数组下标序号就是它的id.
+        index.insert_v1(id as u64, base_vec.clone(), ef_construction, m, m_max);
     }
-
     index
 }
 
+/**************************  测试主体  **************************/
 #[test]
 fn test_hnsw_in_sift1m(){
     for &(base_limit, k, ef_search, query_limit) in HNSW_IN_SIFT1M_PARAMS {
@@ -136,8 +149,7 @@ fn run_hnsw_in_sift1m_case(
     base_limit: usize,
     k: usize,
     ef_search: usize,
-    query_limit: usize,
-) {
+    query_limit: usize,) {
     let base_bytes = load_sift_bytes("data//sift1m//sift//sift_base.fvecs")
         .expect("in function run_hnsw_in_sift1m_case, load base_bytes error");
     let base_vecs = read_fvecs(&base_bytes,base_limit);
@@ -209,8 +221,7 @@ fn run_hnsw_in_sift1m_case_groundtruth(
     base_limit: usize,
     k: usize,
     ef_search: usize,
-    query_limit: usize,
-) {
+    query_limit: usize, ) {
     let base_bytes = load_sift_bytes("data//sift1m//sift//sift_base.fvecs")
         .expect("in function run_hnsw_in_sift1m_case, load base_bytes error");
     let base_vecs = read_fvecs(&base_bytes,base_limit);

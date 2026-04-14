@@ -1,6 +1,6 @@
 use core::f32;
 use rand::Rng;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::f32::{INFINITY};
 
 use crate::distance;
@@ -15,7 +15,8 @@ pub struct HnswIndex {
     entry_node_id: Option<Id>, //保存入口节点Id
     //max_level: u64
     index_max_level: usize, //保存图中最高层数
-    metric: Metric
+    metric: Metric,
+    id_to_index: HashMap<Id, usize>, //负责给出这个 id 对应在 nodes 里的第几个位置
 }
 #[derive(Debug, Clone)]
 pub struct HnswNode {
@@ -90,6 +91,7 @@ impl HnswNode {
         &self.node_max_level
 
     }
+
     pub fn get_neighbors(&self) -> &Vec<Vec<u64>> {
         &self.neighbors
     }
@@ -125,6 +127,7 @@ impl HnswIndex {
         // return nodes.len(); // 不可以这么写,因为这个方法是面向当前对象的,必须有self
         return self.nodes.len();
     }
+
     pub fn is_empty(&self) -> bool {
         // return nodes.empty();
         return self.nodes.is_empty();
@@ -207,12 +210,21 @@ impl HnswIndex {
     //而“按 id 找节点”是在做：
     //在 self.nodes: Vec<HnswNode> 里，找到 node.id == target_id 的那个节点
     pub fn get_node_by_id(&self, target_id: Id) -> Option<&HnswNode> {
-        for x in self.nodes.iter() {
-            if x.id == target_id {
-                return Some(x);
-            }
+        // for x in self.nodes.iter() {
+        //     if x.id == target_id {
+        //         return Some(x);
+        //     }
+        // }
+        // None
+
+        // 复习: self.id_to_index[&target_id] 直接这么写, 意思是“我认定这里一定有，没找到就直接炸。”
+        //       self.id_to_index.get(&target_id), 意思是“帮我查一下，有就给我，没有就返回 None。”
+        if let Some(idx) = self.id_to_index.get(&target_id){
+            Some(&self.nodes[*idx])
+        } else{
+            None
         }
-        None
+
     }
 
     //“按 id 找到节点然后修改它”。
@@ -222,7 +234,14 @@ impl HnswIndex {
         //iter_mut()会返回一个可变引用的迭代器,这样我们就可以修改迭代器中的元素了.
         //find()方法会返回一个Option<&mut HnswNode>,如果找到了满足条件的元素,
         //就返回Some(&mut HnswNode),否则返回None.
-        self.nodes.iter_mut().find(|x| x.id == target_id)
+        // self.nodes.iter_mut().find(|x| x.id == target_id)
+
+        if let Some(idx) = self.id_to_index.get(&target_id){
+            Some(&mut self.nodes[*idx])
+        } else{
+            None
+        }
+
     }
 
     //把编号为neighbor_id的节点添加到node_id的第level层的邻居Vec中
@@ -245,6 +264,7 @@ impl HnswIndex {
     pub fn get_entry_node_id(&self) -> Option<u64> {
         self.entry_node_id
     }
+
     pub fn search_v0(&self, query: &Vector) -> Option<Id> {
         if self.is_empty() {
             return None;
@@ -543,6 +563,7 @@ impl HnswIndex {
             return candidate_sequence[..k].to_vec();
         }
     }
+    
     pub fn sample_level(&self) -> usize {
         //返回一个非负整数，表示新插入节点的最高层编号。
         //返回值应满足“高层更稀少、低层更多”的分布趋势.
@@ -584,6 +605,8 @@ impl HnswIndex {
             self.index_max_level = new_node_level;
             // 插入图中
             self.nodes.push(new_node);
+            // 插入新节点时更新hashmap
+            self.id_to_index.insert(id, self.nodes.len());
             //结束
             return;
         }

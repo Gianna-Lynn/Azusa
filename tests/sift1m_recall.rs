@@ -42,7 +42,7 @@ pub fn read_f32(input: &mut &[u8]) -> f32{
 }
 
 // TODO: 可优化: 使用这个函数的时候, 要检查取出的每一条向量是不是和dim一致
-pub fn read_one_vec(input: &mut &[u8]) -> Vec<f32>{
+pub fn read_one_fvec(input: &mut &[u8]) -> Vec<f32>{
     // 第一步
     // 先读一个维度 dim
     let dim = read_u32(input) as usize; 
@@ -88,7 +88,7 @@ pub fn read_fvecs(bytes: &[u8], limit: usize) -> Vec<Vec<f32>>{
     // let mut input: &[u8] = &bytes;   // &bytes 是 &&[u8], Rust 自动解引用转换为 &[u8]
     // let mut input: &[u8] = bytes;    // bytes直接就是 &[u8]
 
-    // debug: 这里是Vec<Vec<u32>>,不是f32. 因为我们在读取的是字节.
+    // 这里暂存读取出来的向量列表，每条向量的元素类型是 f32。
     let mut res: Vec<Vec<f32>> =  Vec::new(); 
     // TODO: 可优化:使用std::io::Cursor自动管理指针的位置, 读完以后位置自动向前.
     for _ in 0..limit{
@@ -97,9 +97,36 @@ pub fn read_fvecs(bytes: &[u8], limit: usize) -> Vec<Vec<f32>>{
         if input.len() < size_of::<f32>(){ 
             panic!("In function read_fvecs, got a vector without enough dim");
         }
-        let tmp = read_one_vec(&mut input);
+        let tmp = read_one_fvec(&mut input);
         if !tmp.is_empty(){
-            // 考虑到read_one_vec可能
+            res.push(tmp); 
+        }
+    }
+    res
+}
+
+pub fn read_one_uvec(input: &mut &[u8]) -> Vec<u32>{
+    let dim = read_u32(input) as usize; 
+    let mut vec_u32:Vec<u32> = Vec::new();
+    for _ in 0..dim{
+        if input.len() < size_of::<u32>(){
+            panic!("In function read_one_vec, got a vector without enough dim");
+        }
+        let tmp = read_u32(input);
+        vec_u32.push(tmp);
+    }
+    vec_u32
+}
+
+pub fn read_uvecs(bytes: &[u8], limit: usize) -> Vec<Vec<u32>>{
+    let mut input = bytes;
+    let mut res: Vec<Vec<u32>> =  Vec::new(); 
+    for _ in 0..limit{
+        if input.len() < size_of::<f32>(){ 
+            panic!("In function read_ivecs, got a vector without enough dim");
+        }
+        let tmp = read_one_uvec(&mut input);
+        if !tmp.is_empty(){
             res.push(tmp); 
         }
     }

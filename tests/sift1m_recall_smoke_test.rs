@@ -36,11 +36,12 @@ const SMOKE_TEST_PARAMS: &[Sift1mSweepParams] = &[
 const HNSW_IN_SIFT1M_PARAMS: &[Sift1mSweepParams] = &[
     (500, 5, 80, 5), // (base_limit, k, ef_search, query_limit)
     // 想做 sweep 的时候，继续往这里加 tuple 就行。
-    (500, 5, 120, 5),
-    (500, 5, 160, 5),
-    (500, 5, 200, 5), 
+    // (500, 5, 120, 5),
+    // (500, 5, 160, 5),
+    // (500, 5, 200, 5), 
     // (1000, 5, 80, 5),
-    // (1000, 5, 120, 10),
+    (1000, 5, 120, 10),
+    //  (10, 5, 10, 5),
 ];
 
 
@@ -57,8 +58,7 @@ fn run_sift1m_recall_case(
     limit: usize,
     k: usize,
     ef_search: usize,
-    query_limit: usize,
-) {
+    query_limit: usize,) {
     let base_bytes = load_sift_bytes("data//sift1m//sift//sift_base.fvecs")
         .expect("in function run_sift1m_recall_case, load base_bytes error");
     let base_vecs = read_fvecs(&base_bytes,limit);
@@ -194,4 +194,103 @@ fn run_hnsw_in_sift1m_case(
     println!("  recall@{} = [{}/{}]", k , total_recall_at_k, cnt);
     println!("  exact@{}  = [{}/{}]", k , total_exact_at_k, cnt);
     println!("---\n");
+}
+
+
+
+#[test]
+fn test_hnsw_in_sift1m_groundtruth(){
+    for &(base_limit, k, ef_search, query_limit) in HNSW_IN_SIFT1M_PARAMS {
+        run_hnsw_in_sift1m_case_groundtruth(base_limit, k, ef_search, query_limit);
+    }
+}
+
+fn run_hnsw_in_sift1m_case_groundtruth(
+    base_limit: usize,
+    k: usize,
+    ef_search: usize,
+    query_limit: usize,
+) {
+    let base_bytes = load_sift_bytes("data//sift1m//sift//sift_base.fvecs")
+        .expect("in function run_hnsw_in_sift1m_case, load base_bytes error");
+    let base_vecs = read_fvecs(&base_bytes,base_limit);
+    let index =  build_index(&base_vecs);
+
+    let query_bytes = load_sift_bytes("data//sift1m//sift//sift_query.fvecs")
+        .expect("in function run_hnsw_in_sift1m_case, load query_bytes error");
+    let query_vecs = read_fvecs(&query_bytes,query_limit);
+
+    let groundtruth_bytes = load_sift_bytes("data//sift1m//sift//sift_groundtruth.ivecs")
+        .expect("in function run_hnsw_in_sift1m_case, load query_bytes error");    
+    let groundtruth_vecs = read_uvecs(&groundtruth_bytes,query_limit);
+    // println!("{:#?}", groundtruth_vecs);
+    
+
+
+    let mut valid_query_cnt = 0;
+    let mut total_recall_at_k:f32 = 0.0;
+    let mut total_exact_at_k = 0;
+    for(query_idx,  query_vec) in query_vecs.iter().enumerate(){
+        // query没有单独的ID. query的序号就是它的隐式ID
+        // groundtruth 也按照同样的序号对齐.
+        // 在循环当中, 我们认为这个序号就是query_idx.
+
+        // 给一条 query 的 groundtruth，取得前 k 个整数 id的方法.
+        let groundtruth_vec = &groundtruth_vecs[query_idx];   //使用引用&: 只需要读取, 不需要修改, 不要从大Vec中移出元素
+        // println!("groundtruth_vec : {:#?}", groundtruth_vec);
+        let groundtruth_vec_top_k : Vec<_>= groundtruth_vec
+            .iter()
+            .copied()
+            .filter(|&id| id < base_limit as u32)
+            .take(k)
+            .collect();
+        
+        println!("groundtruth_vec_top_k : {:#?}", groundtruth_vec_top_k);
+        //只有当 groundtruth_vec_top_k.len() == k 时，才把这条 query 纳入统计
+        if groundtruth_vec_top_k.len() != k{
+            println!("Skip this query: groundtruth_vec_top_k.len() != k");
+            continue;
+        }     
+        // valid_query_cnt 表示“真正纳入 recall/exact 统计的 query 数”   
+        valid_query_cnt += 1;
+        let search_result_ids = index.search_knn_v1(&query_vec, k, ef_search);
+        let search_result_ids_u32: Vec<u32> = search_result_ids.iter().map(|&id| id as u32).collect();
+
+        let groundtruth_set_top_k: HashSet<_> = groundtruth_vec_top_k.iter().copied().collect();
+        let overlap: Vec<_> = search_result_ids_u32
+            .iter()
+            .copied()
+            .filter(|id| groundtruth_set_top_k.contains(id))
+            .collect();
+        let overlap_num = overlap.len();
+
+        let recall_at_k = overlap_num as f32 / k as f32;
+        let exact_at_k = groundtruth_vec_top_k.len() >= k
+                            && search_result_ids.len() >= k
+                            && &groundtruth_vec_top_k[..k] == &search_result_ids_u32[..k];
+        
+        total_recall_at_k += recall_at_k;
+        if exact_at_k{
+            total_exact_at_k += 1;
+        }
+    }
+
+
+    // 关于top-k中涉及到的两个指标:
+    // recall@k : 前k个命中了多少个. 不要求顺序一致, 只要求id部分或全部重合. 可以是一个计数值或者百分比分数.
+    // exact@k  : 前k个是否完全一致. 要求顺序一致, 要求id全部重合. 是一个布尔值.
+    
+    println!("---");
+    println!("SUMMARY: base_limit={}, k={}, ef_search={}, query_limit={}, valid_query_cnt={}", base_limit, k,ef_search, query_limit, valid_query_cnt);
+    
+    if valid_query_cnt == 0{
+        println!("no valid queries under current base_limit");
+    }
+    else {
+        println!("  valid_query_cnt = [{}]", valid_query_cnt);
+        println!("  recall@{} = [{}/{}]", k , total_recall_at_k, valid_query_cnt);
+        println!("  average recall@{} = [{}]", k, total_recall_at_k / valid_query_cnt as f32);
+        println!("  exact@{}  = [{}/{}]", k , total_exact_at_k, valid_query_cnt);
+        println!("---\n");
+    }
 }

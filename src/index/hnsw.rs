@@ -107,6 +107,7 @@ impl HnswIndex {
             entry_node_id: None,
             index_max_level: 0,
             metric: Metric::Cosine, //默认使用Cosine
+            id_to_index: HashMap::new(),
         }
     }
 
@@ -116,6 +117,7 @@ impl HnswIndex {
             entry_node_id: None,
             index_max_level: 0,
             metric,
+            id_to_index: HashMap::new(),
         }
     }
 

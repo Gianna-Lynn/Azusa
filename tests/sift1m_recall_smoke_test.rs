@@ -12,6 +12,7 @@
 mod sift1m_recall;
 
 use std::collections::HashSet;
+use std::time::{Duration, Instant};
 
 use crate::sift1m_recall::*;
 use toy_vector_db::{
@@ -30,6 +31,18 @@ const TEST_METRIC: Metric = Metric::L2;
 
 type Sift1mSweepParams = (usize, usize, usize, usize);
 
+type Sift1mSweepParamsGroup = (usize, usize, &'static [usize], usize);
+
+#[derive(Debug, Clone)]
+struct SweepGroup{
+    base_limit: usize,
+    k: usize,
+    ef_search: &'static [usize],
+    query_limit: usize,
+}
+
+
+
 const SMOKE_TEST_PARAMS: &[Sift1mSweepParams] = &[
     (10, 5, 10, 5), // (limit, k, ef_search, query_limit)
 ];
@@ -40,15 +53,27 @@ const HNSW_IN_SIFT1M_PARAMS: &[Sift1mSweepParams] = &[
     // (200, 5, 50, 5), 
     // (200, 5, 80, 5), 
 
-    (500, 5, 80, 5),     
-    (500, 5, 120, 5),
-    (500, 5, 160, 5),
-    (500, 5, 200, 5), 
+    // (500, 5, 80, 5),     
+    // (500, 5, 120, 5),
+    // (500, 5, 160, 5),
+    // (500, 5, 200, 5), 
 
+    // (1000, 5, 20, 5),
+    // (1000, 5, 40, 5),
+    // (1000, 5, 60, 5),
     // (1000, 5, 80, 5),
-    // (1000, 5, 120, 10),
+
+    (1000, 5, 40, 5),
 ];
 
+const HNSW_IN_SIFT1M_PARAMS_GROUP: &[SweepGroup] = &[
+    SweepGroup{
+        base_limit: 5000,
+        k: 5,
+        ef_search: &[60],
+        query_limit: 10,
+    },
+];
 
 
 #[test]
@@ -87,8 +112,12 @@ fn run_sift1m_recall_case(
 
     let query = query_vecs[0].clone();
     let top_k =  exact_top_k(&base_vecs, &query, k, TEST_METRIC);
+    let build_start = Instant::now();
     let index = build_index(&base_vecs);
+    println!("build_index took: {:?}", build_start.elapsed());
+    let search_start = Instant::now();
     let search_result = index.search_knn_v1(&query, k, ef_search);
+    println!("search_knn_v1 took: {:?}", search_start.elapsed());
 
     //打印向量本体
     //println!("query is {:?}",query);
@@ -129,6 +158,7 @@ fn build_index(base_vecs: &[Vec<f32>]) -> HnswIndex {
     let ef_construction = 20;
     let m = 4;
     let m_max = 8;
+    println!("insert_v1 params: ef_construction={}, m={}, m_max={}", ef_construction, m, m_max);
 
     for (id, base_vec) in base_vecs.iter().enumerate() {
         // 认为每一条向量的数组下标序号就是它的id.
@@ -140,72 +170,73 @@ fn build_index(base_vecs: &[Vec<f32>]) -> HnswIndex {
 /**************************  测试主体  **************************/
 #[test]
 fn test_hnsw_in_sift1m(){
-    for &(base_limit, k, ef_search, query_limit) in HNSW_IN_SIFT1M_PARAMS {
-        run_hnsw_in_sift1m_case(base_limit, k, ef_search, query_limit);
+    for case in HNSW_IN_SIFT1M_PARAMS_GROUP {
+        // for &ef_search_num in case.ef_search{
+        //     run_hnsw_in_sift1m_case(case.base_limit, case.k, ef_search_num, case.query_limit)
+        // }
+        run_hnsw_in_sift1m_case(case.base_limit, case.k, case.ef_search, case.query_limit)
     }
 }
 
 fn run_hnsw_in_sift1m_case(
     base_limit: usize,
     k: usize,
-    ef_search: usize,
+    ef_search: &'static [usize],
     query_limit: usize,) {
     let base_bytes = load_sift_bytes("data//sift1m//sift//sift_base.fvecs")
         .expect("in function run_hnsw_in_sift1m_case, load base_bytes error");
     let base_vecs = read_fvecs(&base_bytes,base_limit);
+    let build_start = Instant::now();
     let index =  build_index(&base_vecs);
+    println!("base_limit={} build_index took: {:?}", base_limit, build_start.elapsed());
 
     let query_bytes = load_sift_bytes("data//sift1m//sift//sift_query.fvecs")
         .expect("in function run_hnsw_in_sift1m_case, load query_bytes error");
     let query_vecs = read_fvecs(&query_bytes,query_limit);
 
-    let mut cnt = 0;
-    let mut total_recall_at_k:f32 = 0.0;
-    let mut total_exact_at_k = 0;
-    for query_vec in query_vecs{
-        
-        cnt = cnt + 1;
+    for ef_search_num in ef_search{
+        let mut cnt = 0;
+        let mut total_recall_at_k:f32 = 0.0;
+        let mut total_exact_at_k = 0;
+        println!("--- base_limit={}, ef_search={} ---", base_limit, ef_search_num);
+        for query_vec in query_vecs.iter(){
+            
+            cnt = cnt + 1;
 
-        let query = query_vec.clone();
+            let query = query_vec.clone();
 
-        let brute_force = exact_top_k(&base_vecs, &query, k, TEST_METRIC);
-        let search_result_ids = index.search_knn_v1(&query, k, ef_search);
-        let brute_force_ids: Vec<_> = brute_force.iter().map(|(id,_)|   *id).collect();
+            let brute_force = exact_top_k(&base_vecs, &query, k, TEST_METRIC);
+            let search_start = Instant::now();
+            let search_result_ids = index.search_knn_v1(&query, k, *ef_search_num);
+            println!("  query[{}/{}] ef_search={} search_knn_v1 took: {:?}", cnt, query_limit, ef_search_num, search_start.elapsed());
+            let brute_force_ids: Vec<_> = brute_force.iter().map(|(id,_)|   *id).collect();
 
-        let brute_set: HashSet<_> = brute_force_ids.iter().copied().collect();
-        let overlap: Vec<_> = search_result_ids
-            .iter()
-            .copied()
-            .filter(|id| brute_set.contains(id))
-            .collect();
-        let overlap_num = overlap.len();
+            let brute_set: HashSet<_> = brute_force_ids.iter().copied().collect();
+            let overlap: Vec<_> = search_result_ids
+                .iter()
+                .copied()
+                .filter(|id| brute_set.contains(id))
+                .collect();
+            let overlap_num = overlap.len();
 
-        let recall_at_k = overlap_num as f32 / k as f32;
-        let exact_at_k = brute_force_ids.len() >= k
-                            && search_result_ids.len() >= k
-                            && &brute_force_ids[..k] == &search_result_ids[..k];
-        total_recall_at_k += recall_at_k;
-        if exact_at_k{
-            total_exact_at_k += 1;
+            let recall_at_k = overlap_num as f32 / k as f32;
+            let exact_at_k = brute_force_ids.len() >= k
+                                && search_result_ids.len() >= k
+                                && &brute_force_ids[..k] == &search_result_ids[..k];
+            total_recall_at_k += recall_at_k;
+            if exact_at_k{
+                total_exact_at_k += 1;
+            }
         }
-        // println!("\n========== query[{}]  ==========", cnt);
-        // for (id, score) in brute_force.iter() {
-        //     println!("id={}, score={}", id, score);
-        // }
-        // println!("recall@{} = {}", k, recall_at_k);
-        // println!("exact@{} = {}", k, exact_at_k);
+        // 关于top-k中涉及到的两个指标:
+        // recall@k : 前k个命中了多少个. 不要求顺序一致, 只要求id部分或全部重合. 可以是一个计数值或者百分比分数.
+        // exact@k  : 前k个是否完全一致. 要求顺序一致, 要求id全部重合. 是一个布尔值.
+        println!("---");
+        println!("SUMMARY: base_limit={}, k={}, ef_search={}, query_limit={}", base_limit, k, ef_search_num, query_limit);
+        println!("  recall@{} = [{}/{}]", k , total_recall_at_k, cnt);
+        println!("  exact@{}  = [{}/{}]", k , total_exact_at_k, cnt);
+        println!("---\n");
     }
-
-
-    // 关于top-k中涉及到的两个指标:
-    // recall@k : 前k个命中了多少个. 不要求顺序一致, 只要求id部分或全部重合. 可以是一个计数值或者百分比分数.
-    // exact@k  : 前k个是否完全一致. 要求顺序一致, 要求id全部重合. 是一个布尔值.
-    
-    println!("---");
-    println!("SUMMARY: base_limit={}, k={}, ef_search={}, query_limit={}", base_limit, k,ef_search, query_limit);
-    println!("  recall@{} = [{}/{}]", k , total_recall_at_k, cnt);
-    println!("  exact@{}  = [{}/{}]", k , total_exact_at_k, cnt);
-    println!("---\n");
 }
 
 
@@ -241,6 +272,7 @@ fn run_hnsw_in_sift1m_case_groundtruth(
     let mut valid_query_cnt = 0;
     let mut total_recall_at_k:f32 = 0.0;
     let mut total_exact_at_k = 0;
+    let mut total_search_time = Duration::default();
     for(query_idx,  query_vec) in query_vecs.iter().enumerate(){
         // query没有单独的ID. query的序号就是它的隐式ID
         // groundtruth 也按照同样的序号对齐.
@@ -264,7 +296,10 @@ fn run_hnsw_in_sift1m_case_groundtruth(
         }     
         // valid_query_cnt 表示“真正纳入 recall/exact 统计的 query 数”   
         valid_query_cnt += 1;
+        let search_start = Instant::now();
         let search_result_ids = index.search_knn_v1(&query_vec, k, ef_search);
+        println!("query[{}] search took: {:?}", query_idx, search_start.elapsed());
+        total_search_time += search_start.elapsed();
         let search_result_ids_u32: Vec<u32> = search_result_ids.iter().map(|&id| id as u32).collect();
 
         let groundtruth_set_top_k: HashSet<_> = groundtruth_vec_top_k.iter().copied().collect();
@@ -299,6 +334,8 @@ fn run_hnsw_in_sift1m_case_groundtruth(
     }
     else {
         println!("  valid_query_cnt = [{}]", valid_query_cnt);
+        println!("  total_search_time = {:?}", total_search_time);
+        println!("  avg_search_time   = {:?}", total_search_time / valid_query_cnt as u32);
         println!("  recall@{} = [{}/{}]", k , total_recall_at_k, valid_query_cnt);
         println!("  average recall@{} = [{}]", k, total_recall_at_k / valid_query_cnt as f32);
         println!("  exact@{}  = [{}/{}]", k , total_exact_at_k, valid_query_cnt);

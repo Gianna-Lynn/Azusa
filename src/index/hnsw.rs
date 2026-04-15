@@ -1,12 +1,13 @@
 use core::f32;
-use rand::Rng;
+use rand::{Rng, SeedableRng};
+use rand::rngs::{StdRng};
 use std::collections::{HashMap, HashSet};
 use std::f32::{INFINITY};
 
 use crate::distance;
 use crate::types::{Id, Metric, Vector};
 
-
+const MY_SEED : u64 = 42;
 
 #[derive(Debug)]
 pub struct HnswIndex {
@@ -17,6 +18,7 @@ pub struct HnswIndex {
     index_max_level: usize, //保存图中最高层数
     metric: Metric,
     id_to_index: HashMap<Id, usize>, //负责给出这个 id 对应在 nodes 里的第几个位置
+    rng: StdRng,
 }
 #[derive(Debug, Clone)]
 pub struct HnswNode {
@@ -108,6 +110,7 @@ impl HnswIndex {
             index_max_level: 0,
             metric: Metric::Cosine, //默认使用Cosine
             id_to_index: HashMap::new(),
+            rng : StdRng::seed_from_u64(MY_SEED),
         }
     }
 
@@ -118,6 +121,7 @@ impl HnswIndex {
             index_max_level: 0,
             metric,
             id_to_index: HashMap::new(),
+            rng : StdRng::seed_from_u64(MY_SEED),
         }
     }
 
@@ -566,16 +570,15 @@ impl HnswIndex {
         }
     }
     
-    pub fn sample_level(&self) -> usize {
+    pub fn sample_level(&mut self) -> usize {
         //返回一个非负整数，表示新插入节点的最高层编号。
         //返回值应满足“高层更稀少、低层更多”的分布趋势.
         //连续随机抛硬币，直到失败为止, 或用某种几何分布近似方法
         let p = 0.5;
-        let mut rng = rand::thread_rng();
         let mut level = 0usize;
 
         //以p的概率返回true. 大多数节点会停在0或者1层.
-        while rng.gen_bool(p) {
+        while self.rng.gen_bool(p) {
             level += 1;
         }
         level
@@ -605,10 +608,11 @@ impl HnswIndex {
             self.entry_node_id = Some(id);
             // 更新 index_max_level
             self.index_max_level = new_node_level;
+            // 插入新节点时更新hashmap
+            // 注意先更新hashmap然后再push, 否则需要改成self.nodes.len()-1
+            self.id_to_index.insert(id, self.nodes.len());
             // 插入图中
             self.nodes.push(new_node);
-            // 插入新节点时更新hashmap
-            self.id_to_index.insert(id, self.nodes.len());
             //结束
             return;
         }
@@ -623,8 +627,9 @@ impl HnswIndex {
 
         
         // debug: 遗漏: 因为前面的代码实在太多, 导致遗漏了"新节点进图"的这个动作.
+        self.id_to_index.insert(id, self.nodes.len());
         self.nodes.push(new_node); // 所有权分析: push方法接收的是无引用的参数, 获得了所有权.
-
+   
         // IMPORTANT: 新节点在此时 push，虽然邻接表还未完全建立。
         // 但由于新节点仅在 [0, new_node_level] 层出现，
         // 而 Phase 2 只在更高层运行，所以不会被意外访问。
@@ -819,9 +824,11 @@ impl HnswIndex {
         if self.is_empty() {
             self.entry_node_id = Some(id);
             self.index_max_level = new_node_level;
+            self.id_to_index.insert(id, self.nodes.len());
             self.nodes.push(new_node);
             return;
         }
+        self.id_to_index.insert(id, self.nodes.len());
         self.nodes.push(new_node);
         let mut entry_point_id = self.get_entry_node_id().expect("in insert_v1, entry_node_id is none");
         if self.index_max_level >= new_node_level + 1 {
@@ -877,45 +884,23 @@ impl HnswIndex {
     // 实现一个简化版本的邻居选择函数
     // cadidates: 候选集合, m:返回的邻居数目,如果不足m个,就全部返回.
     pub fn select_neighbors_simple(&self, candidate_set: &HashSet<Id>, query: &Vector, m: usize) -> Vec<Id>{
-        
-        let mut candidate_sequence: Vec<Id> = candidate_set.iter().copied().collect();
-        //into_iter消费了candidate_set, 以后就不能用了.intor_iter()迭代出的是&Id, 而不是Id, 不能收集进入Vec<Id>
-        //这个地方改成iter().copied(), 从迭代器中复制值,然后再colletct
-
-        candidate_sequence.sort_by(|id1, id2| {
-            let node_1 = self.get_node_by_id(*id1).expect("id1找不到节点");
-            let node_2 = self.get_node_by_id(*id2).expect("id2找不到节点");
-            let score1 = self.compute_similarity(query, node_1.get_data());
-            let score2 = self.compute_similarity(query, node_2.get_data());
-            // partial_cmp 只做一件事：比较两个数，返回 Less、Equal、Greater。
-            match score2.partial_cmp(&score1).unwrap() {
-                // partical_cmp语句返回: scroe2 (  > / < / = ) score1
-                // 这会导致高分排在更小下标,也就是降序
-                // sort_by 约定：比较器返回 Less，就表示第一个参数要排在第二个参数前面；
-                // 返回 Greater，就表示第一个参数要排在第二个参数后面。
-                std::cmp::Ordering::Equal => id1.cmp(id2),
-                other => other,
+        let mut id_score_map: Vec<(u64, f32)>= candidate_set
+            .iter()
+            .map( |candidate|{
+                let candidate_node = self.get_node_by_id(*candidate).expect("In function select_neighbors_simple, ");
+                let pair = (*candidate, self.compute_similarity(query, candidate_node.get_data()));
+                pair
+            })
+            .collect();
+        id_score_map.sort_by(|a, b|
+            match b.1.partial_cmp(&a.1).unwrap(){       //"反过来比", 大的在前面
+                std::cmp::Ordering::Equal => a.0.cmp(&b.0), //"正着比", 小的在前面
+                other=> other,//如果不是equal, 那就原封不动地返回partial_cmpd的结果.
+                                        //这里的前后两个other都是变量名.你可以写 x => x
             }
-        });
-
-        // let selected:HashSet<Id>= candidate_sequence.iter().take(m).copied().collect();
-        // iter()：按引用遍历:遍历时拿到的是元素的引用，不是元素本身,迭代器走出来的每一项&u64
-        // take(m)：只取前 m 个:少于m个甚至为空都没问题.
-        // copied()：把 &Id 变成 Id
-        // collect()：收集成 HashSet<Id>.这样会让返回的结果重新变得无序.
-        
-        // 改进: 返回Vec<Id>, 而不是Hashset<Id>, 保持有序.
-        // 用下面的切片语句做到"在candidate_sequence中,取前m个, 如果不足m个,就全部返回."
-        let take_count = m.min(candidate_sequence.len());
-        return candidate_sequence[..take_count].to_vec();
-
-        // 改进:
-        // 用下面的.truncate(m)方法搭配判断语句,也能达到同样效果.
-        // if candidate_sequence.len() > m {
-        //     candidate_sequence.truncate(m);
-        // }
-        // return candidate_sequence;
-
+        );   
+        let take_count = m.min(id_score_map.len());
+        return id_score_map.iter().take(take_count).map(|(id, _)| *id).collect();
     }
  
     pub fn delete_neighbor_relationship_at_all_levels(&mut self, node1_id: Id, node2_id:Id){

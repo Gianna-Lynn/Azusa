@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use crate::sift1m_recall::*;
 use toy_vector_db::{
-    distance::similarity, index::hnsw::{HnswIndex, HnswNode}, types::Metric
+    distance::similarity, index::hnsw::{HnswIndex}, types::Metric
 };
 const TEST_METRIC: Metric = Metric::L2;
 
@@ -30,8 +30,6 @@ const TEST_METRIC: Metric = Metric::L2;
 // ef_search    控制了我们在hnsw里搜索的时候, 最多看多少个节点. 这个参数越大, 搜索效果越好, 但是搜索速度越慢.
 
 type Sift1mSweepParams = (usize, usize, usize, usize);
-
-type Sift1mSweepParamsGroup = (usize, usize, &'static [usize], usize);
 
 #[derive(Debug, Clone)]
 struct SweepGroup{

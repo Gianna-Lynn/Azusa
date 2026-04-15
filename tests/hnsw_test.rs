@@ -167,7 +167,7 @@ fn test_nearest_and_furthest() {
     let test_query = vec![6.0, 6.0];
 
     // 5.检查搜索结果.
-    if let Some(result_id) = index.get_nearest(&set, &test_query) {
+    if let Some(result_id) = index.get_nearest_v0(&set, &test_query) {
         assert!(result_id == 3 || result_id == 6);
         if let Some(result_node) = index.get_node_by_id(result_id) {
             println!("The nearest result is:");
@@ -178,7 +178,7 @@ fn test_nearest_and_furthest() {
         panic!("get_nearest方法返回None")
     }
 
-    if let Some(result_id) = index.get_furthest(&set, &test_query) {
+    if let Some(result_id) = index.get_furthest_v0(&set, &test_query) {
         assert!(result_id == 1 || result_id == 4);
         if let Some(result_node) = index.get_node_by_id(result_id) {
             println!("The furthest result is:");

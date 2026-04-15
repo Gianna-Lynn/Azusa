@@ -320,7 +320,40 @@ impl HnswIndex {
         }
     }
 
-    pub fn get_nearest(&self, set: &HashSet<Id>, query: &Vector) -> Option<Id> {
+    pub fn get_nearest_v1(&self, id_similarity_cache: &mut HashMap<Id, f32>, set: &HashSet<Id>, query: &Vector) -> Option<Id> {
+        //ご注意ください:如果函数签名中返回值仅仅写Id, 那么假如集合HashSet为空,就不会有合法的返回值.
+        //需要改成返回Option<Id>
+        //unimplemented!();
+        let mut max_similarity = -INFINITY;
+        let mut max_elem_id: Option<Id> = None;
+
+        for elem_id in set {
+
+            let temp_similarity = self.get_similarity(id_similarity_cache, elem_id, query);
+
+            if temp_similarity > max_similarity {
+                max_similarity = temp_similarity;
+                max_elem_id = Some(*elem_id);
+            } //endif
+        } //endfor
+        max_elem_id
+    }
+
+    pub fn get_furthest_v1(&self,  id_similarity_cache: &mut HashMap<Id, f32>, set: &HashSet<Id>, query: &Vector) -> Option<Id> {
+        let mut min_similarity = INFINITY;
+        let mut min_elem_id: Option<Id> = None;
+
+        for elem_id in set {
+           let temp_similarity = self.get_similarity(id_similarity_cache, elem_id, query);
+            if temp_similarity < min_similarity {
+                min_similarity = temp_similarity;
+                min_elem_id = Some(*elem_id);
+            } //endif
+        } //endfor
+        min_elem_id
+    }
+
+    pub fn get_nearest_v0(&self, set: &HashSet<Id>, query: &Vector) -> Option<Id> {
         //ご注意ください:如果函数签名中返回值仅仅写Id, 那么假如集合HashSet为空,就不会有合法的返回值.
         //需要改成返回Option<Id>
         //unimplemented!();
@@ -338,7 +371,7 @@ impl HnswIndex {
         max_elem_id
     }
 
-    pub fn get_furthest(&self, set: &HashSet<Id>, query: &Vector) -> Option<Id> {
+    pub fn get_furthest_v0(&self, set: &HashSet<Id>, query: &Vector) -> Option<Id> {
         let mut min_similarity = INFINITY;
         let mut min_elem_id: Option<Id> = None;
 
@@ -352,6 +385,7 @@ impl HnswIndex {
         } //endfor
         min_elem_id
     }
+
 
     pub fn get_neighbors_at_lvl(&self, id: Id, lvl: usize) -> HashSet<Id> {
         //ご注意ください:如果你用的是一个不带有&self的静态方法,方法不能访问self.nodes,不能访问索引内部的图结构,只能依靠传入的参数工作.
@@ -378,6 +412,22 @@ impl HnswIndex {
         neighbors_set
     }
 
+    //输入一个cache数组<向量Id, 向量和query的相似度>, 如果目标向量的相似度值在cache中,直接返回,否则手动计算,更新cache
+    pub fn get_similarity(&self, id_similarity_cache: &mut HashMap<Id, f32>, target_id: &Id, query: &Vector)->f32{
+        if let Some(similarity) = id_similarity_cache.get(target_id){
+            //cache命中
+            *similarity
+        }
+        else{
+            //cache不命中
+            let target_node = self.get_node_by_id(*target_id).expect("In function get_similarity, failed to get target_node by target_id");
+            let new_similarity = self.compute_similarity(target_node.get_data(), query);
+            id_similarity_cache.insert(*target_id, new_similarity);
+            new_similarity
+        }
+    }
+
+    // 输出在level这一层, 距离查询向量query最近的一批向量, 总共ef个.
     pub fn search_layer_v0(
         &self,
         query: &Vector,
@@ -387,9 +437,11 @@ impl HnswIndex {
     ) -> HashSet<Id> {
         assert!(ef >= 1, "ef至少为1");
 
+        let mut id_similarity_cache: HashMap<Id, f32> = HashMap::new();
+
         //已经访问过的节点集合v
         let mut v_set: HashSet<Id> = HashSet::new();
-        //候选集合C
+        //候选集合C (大地图)
         let mut c_set: HashSet<Id> = HashSet::new();
         //目前找到的最近点集合W
         let mut w_set: HashSet<Id> = HashSet::new();
@@ -400,17 +452,14 @@ impl HnswIndex {
         w_set.insert(entry_id);
 
         while !c_set.is_empty() {
-            //ご注意ください:extract方法是取出, 要完成"拿出来+删掉".需要一个额外的删除语句.remove
-            let c_id = self.get_nearest(&c_set, query).expect("c_id不存在");
+            //ご注意ください:get方法是查看, 要完成"拿出来+删掉", 就需要一个额外的删除语句: .remove
+            let c_id = self.get_nearest_v1(&mut id_similarity_cache, &c_set, query).expect("c_id不存在");
             c_set.remove(&c_id);
             //ご注意ください:get方法是查看, 要完成"拿出来读取", 而不是删掉.
-            let mut f_id = self.get_furthest(&w_set, query).expect("f_id不存在");
-            let c_node = self.get_node_by_id(c_id).expect("节点不存在");
-            let mut f_node = self.get_node_by_id(f_id).expect("节点不存在");
-
+            let mut f_id = self.get_furthest_v1(&mut id_similarity_cache, &w_set, query).expect("f_id不存在");
             // 逻辑:similarity的值: 两个向量距离越近, similarity的值越大.不要写反了.
-            if self.compute_similarity(&c_node.data, query)
-                < self.compute_similarity(&f_node.data, query)
+            if self.get_similarity(&mut id_similarity_cache, &c_id, query)
+                < self.get_similarity(&mut id_similarity_cache, &f_id, query)
             {
                 break;
             }
@@ -426,20 +475,17 @@ impl HnswIndex {
                 }
                 v_set.insert(e_id);
 
-                f_id = self.get_furthest(&w_set, query).expect("f_id不存在");
-                //逻辑:f_id被重新取了一次,但是f_node并没有被重新取,会导致下面的语句没能同步更新.
-                f_node = self.get_node_by_id(f_id).expect("节点不存在");
-
-                let e_node = self.get_node_by_id(e_id).expect("节点不存在");
+                f_id = self.get_furthest_v1(&mut id_similarity_cache, &w_set, query).expect("f_id不存在");
+        
                 // 逻辑:similarity的值: 两个向量距离越近, similarity的值越大.不要写反了.
-                if self.compute_similarity(&e_node.data, query)
-                    >= self.compute_similarity(&f_node.data, query)
+                if self.get_similarity(&mut id_similarity_cache, &e_id, query)
+                    >= self.get_similarity(&mut id_similarity_cache, &f_id, query)
                     || w_set.len() < ef
                 {
                     c_set.insert(e_id);
                     w_set.insert(e_id);
                     if w_set.len() > ef {
-                        let id_to_remove_op = self.get_furthest(&w_set, query);
+                        let id_to_remove_op = self.get_furthest_v1(&mut id_similarity_cache, &w_set, query);
                         if let Some(id_to_remove) = id_to_remove_op {
                             w_set.remove(&id_to_remove);
                         }
@@ -481,17 +527,12 @@ impl HnswIndex {
         }
     }
 
-    pub fn search_knn_v1(&self, query: &Vector, k: usize, ef_search: usize) -> Vec<Id> {
-        //ef_searchs是第0层的搜索宽度.
-        //返回: 按与 query 的相似度从高到低排序后的 top-k 节点 id
-        //let entry_node_id=self.entry_node_id.expect("search_knn_v1: entry_node_id不存在");
-        //let entry_node = self.get_node_by_id(entry_node_id).expect("search_knn_v1: 未能找到entry_node");
-        //let entry_node_neighbors = entry_node.get_neighbors();
-        //let neighbors_num = entry_node_neighbors.len();
-        //let mut entry_node_neighbors_lvl = 0;
 
-        //let mut current_entry_id = self.entry_node_id.expect("search_knn_v1: entry_node_id不存在");
-        //这个地方不要直接panic, 而是返回一个空集合.
+    //输入: ef_search是第0层的搜索宽度.
+    //返回: 按与 query 的相似度从高到低排序后的 top-k 节点 id
+    pub fn search_knn_v1(&self, query: &Vector, k: usize, ef_search: usize) -> Vec<Id> {
+        
+        //不要直接用expect来panic, 而是结束程序, 返回一个空集合, 表示没有搜索到.
         let Some(mut current_entry_id) = self.entry_node_id else {
             return Vec::new();
         };
@@ -505,12 +546,14 @@ impl HnswIndex {
         let mut candidate_sequence: Vec<Id> = candidate_set.into_iter().collect();
         //into_iter消费了candidate_set, 以后就不能用了.
 
+
+
         /******************************** 排序逻辑 *******************************************/
+        let mut id_similarity_cache: HashMap<Id, f32> = HashMap::new();
+        
         candidate_sequence.sort_by(|id1, id2| {
-            let node_1 = self.get_node_by_id(*id1).expect("id1找不到节点");
-            let node_2 = self.get_node_by_id(*id2).expect("id2找不到节点");
-            let score1 = self.compute_similarity(query, node_1.get_data());
-            let score2 = self.compute_similarity(query, node_2.get_data());
+            let score1 = self.get_similarity(&mut id_similarity_cache, id1, query);
+            let score2 = self.get_similarity(&mut id_similarity_cache, id2, query);
             // partial_cmp 只做一件事：比较两个数，返回 Less、Equal、Greater。
             match score2.partial_cmp(&score1).unwrap() {
                 // partical_cmp语句返回: score2 (  > / < / = ) score1
@@ -552,12 +595,11 @@ impl HnswIndex {
             current_entry_id = self.greedy_search_at_level(query, current_entry_id, lvl);
         }
         let candidate_set = self.search_layer_v0(query, current_entry_id, 0, ef_search);
+        let mut id_similarity_cache: HashMap<Id, f32> = HashMap::new();
         let mut candidate_sequence: Vec<Id> = candidate_set.into_iter().collect();
         candidate_sequence.sort_by(|id1, id2| {
-            let node_1 = self.get_node_by_id(*id1).expect("id1找不到节点");
-            let node_2 = self.get_node_by_id(*id2).expect("id2找不到节点");
-            let score1 = self.compute_similarity(query, node_1.get_data());
-            let score2 = self.compute_similarity(query, node_2.get_data());
+            let score1 = self.get_similarity(&mut id_similarity_cache, id1, query);
+            let score2 = self.get_similarity(&mut id_similarity_cache, id2, query);
             match score2.partial_cmp(&score1).unwrap() {
                 std::cmp::Ordering::Equal => id1.cmp(id2),
                 other => other,
@@ -714,7 +756,7 @@ impl HnswIndex {
             // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
             // 这个for内部的引用体系堪称灾难, 字面意义上的堪称灾难.
 
-
+            
             
             for e_id in neighbors_set{
 
@@ -770,7 +812,7 @@ impl HnswIndex {
                     let new_set: HashSet<Id> = e_new_conn_vec.iter().cloned().collect();
                     // 计算差集
                     let to_delete: HashSet<Id> = old_set.difference(&new_set).cloned().collect();
-                    // 不清楚这里.cloned().collect();的用法目标是什么
+                    // 不清楚这里.cloned().collect();的用法f目标是什么
 
                     // 更新e_node的邻居表.
                     e_node.neighbors[current_lvl] = e_new_conn_vec;
@@ -791,7 +833,7 @@ impl HnswIndex {
             // self.entry_node_id = w_set.iter().next().copied();
             
             // 调用get_nearest函数来从w_set中选出一个最近的节点作为下一层的入口点.
-            entry_point_id = self.get_nearest(&w_set, &data).expect("searchh_result_id赋值错误");
+            entry_point_id = self.get_nearest_v0(&w_set, &data).expect("searchh_result_id赋值错误");
         }
        
 
@@ -871,7 +913,7 @@ impl HnswIndex {
                     }
                 }
             }//endfor
-            entry_point_id = self.get_nearest(&w_set, &data).expect("searchh_result_id赋值错误");
+            entry_point_id = self.get_nearest_v0(&w_set, &data).expect("searchh_result_id赋值错误");
         }
         if new_node_level > self.index_max_level {
             self.entry_node_id = Some(id);

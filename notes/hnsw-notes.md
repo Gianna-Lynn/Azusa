@@ -40,3 +40,47 @@ for x in v.into_iter() {
     println!("{}", x);
 }
 // println!("{:?}", v);  // 错！v 已经被吃掉了,不能再用
+
+
+## HNSW 搜索过程示例
+
+### 初始
+- v = {A}
+- C = [A8]
+- W = [A8]
+
+### 第1轮
+- pop A8, expand A -> {B6, C7}
+- v = {A,B,C}
+- C = [B6, C7]
+- W = [B6, C7, A8]
+
+### 第2轮
+- pop B6, expand B -> {A, D3, E4}
+- A 已访问
+- 加入 D3, 踢掉 A8
+- 加入 E4, 踢掉 C7
+- v = {A,B,C,D,E}
+- C = [D3, E4, C7]
+- W = [D3, E4, B6]
+
+### 第3轮
+- pop D3, expand D -> {B}
+- B 已访问
+- C = [E4, C7]
+- W = [D3, E4, B6]
+
+### 第4轮
+- pop E4, expand E -> {B}
+- B 已访问
+- C = [C7]
+- W = [D3, E4, B6]
+
+### 第5轮
+- c = C7
+- f = B6
+- 7 > 6
+- break
+
+### 结果
+- 返回 W = [D3, E4, B6]

@@ -10,7 +10,6 @@
 // 拿结果和 sift_groundtruth 比较，计算recall@k（召回率）
 
 mod sift1m_recall;
-
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
@@ -20,26 +19,13 @@ use toy_vector_db::{
 };
 const TEST_METRIC: Metric = Metric::L2;
 
-// 人以后主要改这里就行。
-// 说明：
-// - 第一个数组给 `sift1m_recall_smoke_test`
-// - 第二个数组给 `test_hnsw_in_sift1m`
 
 // base_limit   控制了我们从sift1m的文件里, 只读前多少条向量.
 // k            用来表达 "取得前几个最相似的结果."
 // ef_search    控制了我们在hnsw里搜索的时候, 最多看多少个节点. 这个参数越大, 搜索效果越好, 但是搜索速度越慢.
+// build_index 的参数也统一放在这里，方便你在顶部一键调参。
 
 type Sift1mSweepParams = (usize, usize, usize, usize);
-
-#[derive(Debug, Clone)]
-struct SweepGroup{
-    base_limit: usize,
-    k: usize,
-    ef_search: &'static [usize],
-    query_limit: usize,
-}
-
-
 
 const SMOKE_TEST_PARAMS: &[Sift1mSweepParams] = &[
     (10, 5, 10, 5), // (limit, k, ef_search, query_limit)
@@ -64,106 +50,40 @@ const HNSW_IN_SIFT1M_PARAMS: &[Sift1mSweepParams] = &[
     (1000, 5, 40, 5),
 ];
 
-const HNSW_IN_SIFT1M_PARAMS_GROUP: &[SweepGroup] = &[
-    SweepGroup{
-        base_limit: 5000,
+
+#[derive(Debug, Clone, Copy)]
+struct HnswBuildParams {
+    ef_construction: usize,
+    m: usize,
+    m_max: usize,
+}
+
+#[derive(Debug, Clone)]
+struct Sift1mEfSearchSweepGroup {
+    base_limit: usize,
+    k: usize,
+    ef_search: &'static [usize],
+    query_limit: usize,
+}
+
+
+
+
+const HNSW_IN_SIFT1M_PARAMS_GROUP: &[Sift1mEfSearchSweepGroup] = &[
+    Sift1mEfSearchSweepGroup {
+        base_limit: 10000,
         k: 5,
-        ef_search: &[60],
+        ef_search: &[60, 80],
         query_limit: 10,
     },
 ];
 
+const DEFAULT_HNSW_BUILD_PARAMS: HnswBuildParams = HnswBuildParams {
+    ef_construction: 80,
+    m: 4,
+    m_max: 8,
+};
 
-#[test]
-pub fn sift1m_recall_smoke_test(){
-    for &(limit, k, ef_search, query_limit) in SMOKE_TEST_PARAMS {
-        run_sift1m_recall_case("smoke", limit, k, ef_search, query_limit);
-    }
-}
-
-fn run_sift1m_recall_case(
-    case_name: &str,
-    limit: usize,
-    k: usize,
-    ef_search: usize,
-    query_limit: usize,) {
-    let base_bytes = load_sift_bytes("data//sift1m//sift//sift_base.fvecs")
-        .expect("in function run_sift1m_recall_case, load base_bytes error");
-    let base_vecs = read_fvecs(&base_bytes,limit);
-    
-    // println!("base_vecs is {:?}",base_vecs);
-    // println!("base_vecs.len() is {}", base_vecs.len());  //==limit
-    // println!("base_vecs[0].len() is {}", base_vecs[0].len()); //==128
-    
-    // Vec<Vec<f32>> 没有实现 Display trait，只实现了 Debug trait。 
-    // {} 不可行
-    // {:?} — Debug 打印（单行）
-    // {:#?} — Debug 打印（漂亮格式，换行）
-
-    let query_bytes = load_sift_bytes("data//sift1m//sift//sift_query.fvecs")
-        .expect("in function run_sift1m_recall_case, load query_bytes error");
-    let query_vecs = read_fvecs(&query_bytes,query_limit);
-
-    // println!("query_vecs is {:?}",query_vecs);
-    // println!("query_vecs.len() is {}", query_vecs.len());  //==limit
-    // println!("query_vecs[0].len() is {}", query_vecs[0].len()); //==128
-
-    let query = query_vecs[0].clone();
-    let top_k =  exact_top_k(&base_vecs, &query, k, TEST_METRIC);
-    let build_start = Instant::now();
-    let index = build_index(&base_vecs);
-    println!("build_index took: {:?}", build_start.elapsed());
-    let search_start = Instant::now();
-    let search_result = index.search_knn_v1(&query, k, ef_search);
-    println!("search_knn_v1 took: {:?}", search_start.elapsed());
-
-    //打印向量本体
-    //println!("query is {:?}",query);
-    //println!("base_vecs is {:?}",base_vecs);
-    println!("top-{} results:{:?}", k, top_k);
-    println!("hnsw-{} results:{:?}", k, search_result);
-    println!("case={} done", case_name);
-
-}
-
-
-pub fn exact_top_k(base_vecs: &Vec<Vec<f32>>, query: &Vec<f32>, k: usize, metric: Metric)->Vec<(u64, f32)>{
-    let mut results = Vec::new();
-    for(idx, base_vec) in base_vecs.iter().enumerate(){
-        let score = similarity(&query, &base_vec , metric);
-        results.push((idx as u64, score)); //(idx, score)
-    }
-    results.sort_by(|a,b| b.1.partial_cmp(&a.1).unwrap());
-    let top_k = results.iter().take(k).copied().collect::<Vec<_>>();
-    //.iter()把results变成一个 "一个个看元素"的迭代器, .take(k)只取前k个, 
-    //.collect::<Vec<_>>()把前面取得的这些元素重新收集成一个Vec,具体的元素让Rust自己推断.
-
-    // .iter().take(k) 产生的是 Iterator<&(u64, f32)>（引用），
-    // .copied() 会把引用转成实际的值，然后才能正确推断为 Vec<(u64, f32)>。
-    // (u64, f32) 是 Copy 类型（两个字段都是 Copy）.
-    //               Copy 是 Rust 的一个特征（trait），表示这个类型可以通过简单的按位复制来完整复制，无需特殊处理。静态的数据类型基本都是Copy
-    // 对于 Copy 类型，.copied() 明确表达"复制这个 Copy 值"，更高效且符合语义
-    // .clone() 虽然也能用，但对 Copy 类型来说是多余的
-    top_k
-}
-
-fn build_index(base_vecs: &[Vec<f32>]) -> HnswIndex {
-    let mut index = HnswIndex::new_with_metric(TEST_METRIC);
-    // 这组参数比原来的 (10, 2, 4) 更宽松一点：
-    // - ef_construction 提高候选质量
-    // - m / m_max 增强图连通性
-    // 这样更适合先验证 insert_v1 的稳定性和 recall。
-    let ef_construction = 20;
-    let m = 4;
-    let m_max = 8;
-    println!("insert_v1 params: ef_construction={}, m={}, m_max={}", ef_construction, m, m_max);
-
-    for (id, base_vec) in base_vecs.iter().enumerate() {
-        // 认为每一条向量的数组下标序号就是它的id.
-        index.insert_v1(id as u64, base_vec.clone(), ef_construction, m, m_max);
-    }
-    index
-}
 
 /**************************  测试主体  **************************/
 #[test]
@@ -185,7 +105,7 @@ fn run_hnsw_in_sift1m_case(
         .expect("in function run_hnsw_in_sift1m_case, load base_bytes error");
     let base_vecs = read_fvecs(&base_bytes,base_limit);
     let build_start = Instant::now();
-    let index =  build_index(&base_vecs);
+    let index =  build_index(&base_vecs, DEFAULT_HNSW_BUILD_PARAMS);
     println!("base_limit={} build_index took: {:?}", base_limit, build_start.elapsed());
 
     let query_bytes = load_sift_bytes("data//sift1m//sift//sift_query.fvecs")
@@ -240,6 +160,104 @@ fn run_hnsw_in_sift1m_case(
 
 
 #[test]
+pub fn sift1m_recall_smoke_test(){
+    for &(limit, k, ef_search, query_limit) in SMOKE_TEST_PARAMS {
+        run_sift1m_recall_case("smoke", limit, k, ef_search, query_limit);
+    }
+}
+
+fn run_sift1m_recall_case(
+    case_name: &str,
+    limit: usize,
+    k: usize,
+    ef_search: usize,
+    query_limit: usize,) {
+    let base_bytes = load_sift_bytes("data//sift1m//sift//sift_base.fvecs")
+        .expect("in function run_sift1m_recall_case, load base_bytes error");
+    let base_vecs = read_fvecs(&base_bytes,limit);
+    
+    // println!("base_vecs is {:?}",base_vecs);
+    // println!("base_vecs.len() is {}", base_vecs.len());  //==limit
+    // println!("base_vecs[0].len() is {}", base_vecs[0].len()); //==128
+    
+    // Vec<Vec<f32>> 没有实现 Display trait，只实现了 Debug trait。 
+    // {} 不可行
+    // {:?} — Debug 打印（单行）
+    // {:#?} — Debug 打印（漂亮格式，换行）
+
+    let query_bytes = load_sift_bytes("data//sift1m//sift//sift_query.fvecs")
+        .expect("in function run_sift1m_recall_case, load query_bytes error");
+    let query_vecs = read_fvecs(&query_bytes,query_limit);
+
+    // println!("query_vecs is {:?}",query_vecs);
+    // println!("query_vecs.len() is {}", query_vecs.len());  //==limit
+    // println!("query_vecs[0].len() is {}", query_vecs[0].len()); //==128
+
+    let query = query_vecs[0].clone();
+    let top_k =  exact_top_k(&base_vecs, &query, k, TEST_METRIC);
+    let build_start = Instant::now();
+    let index = build_index(&base_vecs, DEFAULT_HNSW_BUILD_PARAMS);
+    println!("build_index took: {:?}", build_start.elapsed());
+    let search_start = Instant::now();
+    let search_result = index.search_knn_v1(&query, k, ef_search);
+    println!("search_knn_v1 took: {:?}", search_start.elapsed());
+
+    //打印向量本体
+    //println!("query is {:?}",query);
+    //println!("base_vecs is {:?}",base_vecs);
+    println!("top-{} results:{:?}", k, top_k);
+    println!("hnsw-{} results:{:?}", k, search_result);
+    println!("case={} done", case_name);
+
+}
+
+
+pub fn exact_top_k(base_vecs: &Vec<Vec<f32>>, query: &Vec<f32>, k: usize, metric: Metric)->Vec<(u64, f32)>{
+    let mut results = Vec::new();
+    for(idx, base_vec) in base_vecs.iter().enumerate(){
+        let score = similarity(&query, &base_vec , metric);
+        results.push((idx as u64, score)); //(idx, score)
+    }
+    results.sort_by(|a,b| b.1.partial_cmp(&a.1).unwrap());
+    let top_k = results.iter().take(k).copied().collect::<Vec<_>>();
+    //.iter()把results变成一个 "一个个看元素"的迭代器, .take(k)只取前k个, 
+    //.collect::<Vec<_>>()把前面取得的这些元素重新收集成一个Vec,具体的元素让Rust自己推断.
+
+    // .iter().take(k) 产生的是 Iterator<&(u64, f32)>（引用），
+    // .copied() 会把引用转成实际的值，然后才能正确推断为 Vec<(u64, f32)>。
+    // (u64, f32) 是 Copy 类型（两个字段都是 Copy）.
+    //               Copy 是 Rust 的一个特征（trait），表示这个类型可以通过简单的按位复制来完整复制，无需特殊处理。静态的数据类型基本都是Copy
+    // 对于 Copy 类型，.copied() 明确表达"复制这个 Copy 值"，更高效且符合语义
+    // .clone() 虽然也能用，但对 Copy 类型来说是多余的
+    top_k
+}
+
+fn build_index(base_vecs: &[Vec<f32>], params: HnswBuildParams) -> HnswIndex {
+    let mut index = HnswIndex::new_with_metric(TEST_METRIC);
+    println!(
+        "insert_v1 params: ef_construction={}, m={}, m_max={}",
+        params.ef_construction,
+        params.m,
+        params.m_max
+    );
+
+    for (id, base_vec) in base_vecs.iter().enumerate() {
+        // 认为每一条向量的数组下标序号就是它的id.
+        index.insert_v1(
+            id as u64,
+            base_vec.clone(),
+            params.ef_construction,
+            params.m,
+            params.m_max,
+        );
+    }
+    index
+}
+
+
+
+
+#[test]
 fn test_hnsw_in_sift1m_groundtruth(){
     for &(base_limit, k, ef_search, query_limit) in HNSW_IN_SIFT1M_PARAMS {
         run_hnsw_in_sift1m_case_groundtruth(base_limit, k, ef_search, query_limit);
@@ -254,7 +272,7 @@ fn run_hnsw_in_sift1m_case_groundtruth(
     let base_bytes = load_sift_bytes("data//sift1m//sift//sift_base.fvecs")
         .expect("in function run_hnsw_in_sift1m_case, load base_bytes error");
     let base_vecs = read_fvecs(&base_bytes,base_limit);
-    let index =  build_index(&base_vecs);
+    let index =  build_index(&base_vecs, DEFAULT_HNSW_BUILD_PARAMS);
 
     let query_bytes = load_sift_bytes("data//sift1m//sift//sift_query.fvecs")
         .expect("in function run_hnsw_in_sift1m_case, load query_bytes error");

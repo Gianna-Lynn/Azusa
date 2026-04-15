@@ -497,12 +497,14 @@ impl HnswIndex {
     }
 
     pub fn greedy_search_at_level(&self, query: &Vector, entry_id: Id, level: usize) -> Id {
+        let mut id_similarity_cache: HashMap<Id, f32> = HashMap::new();
+        
         //在该层经过贪心搜索后得到的最终节点 id. 区分于search_layer_v0(返回的是一个set)
         let mut current_node = self
             .get_node_by_id(entry_id)
             .expect("未能根据entry_id检索到entry_node");
         let mut current_node_neighbors = &current_node.get_neighbors()[level];
-        let mut max_similarity = self.compute_similarity(current_node.get_data(), query);
+        let mut max_similarity = self.get_similarity(&mut id_similarity_cache, &entry_id, query);
         let mut max_similarity_id = entry_id;
         loop {
             for neighbor in current_node_neighbors {
@@ -510,7 +512,7 @@ impl HnswIndex {
                     .get_node_by_id(*neighbor)
                     .expect("未能检索到neighbor_node");
                 let neighbor_node_similarity =
-                    self.compute_similarity(neighbor_node.get_data(), query);
+                    self.get_similarity(&mut id_similarity_cache, neighbor, query);
                 if neighbor_node_similarity > max_similarity {
                     max_similarity = neighbor_node_similarity;
                     max_similarity_id = *neighbor_node.get_id();
@@ -583,9 +585,7 @@ impl HnswIndex {
         entrance_id: Option<Id>,
         query: &Vector,
         k: usize,
-        ef_search: usize,
-
-    ) -> Vec<Id> {
+        ef_search: usize,) -> Vec<Id> {
         let Some(mut current_entry_id) = entrance_id else {
             return Vec::new();
         };

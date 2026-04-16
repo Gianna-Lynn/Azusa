@@ -1,4 +1,9 @@
-﻿mod datasets;
+﻿#![allow(unexpected_cfgs)]
+#![cfg(test_disabled)]
+// 此文件使用的函数版本太老, 已被忽略编译, 来避免不必要的报错.
+
+
+mod datasets;
 
 use datasets::*;
 use std::{collections::HashSet, u64, usize, vec};

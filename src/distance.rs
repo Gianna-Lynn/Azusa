@@ -6,7 +6,7 @@ use crate::types::Metric;
 pub fn similarity(a: &[f32], b: &[f32], metric: Metric)  -> f32{
     match metric{
         Metric::Cosine => cosine_similarity(a, b),
-        Metric::L2 => euclidean_l2_similarity(a, b)
+        Metric::L2 => squared_euclidean_l2_similarity(a, b)
     }
 }
 
@@ -33,19 +33,20 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32{
     }
 }
 
-pub fn euclidean_l2_similarity(a: &[f32], b: &[f32]) -> f32{
+pub fn squared_euclidean_l2_similarity(a: &[f32], b: &[f32]) -> f32{
     // 距离转相似度：距离越近，值越大
-    1.0/ (1.0 + euclidean_l2_distance(a, b))
+    1.0/ (1.0 + squared_euclidean_l2_distance(a, b))
 }
 
 
 
-pub fn euclidean_l2_distance(a: &[f32], b: &[f32]) -> f32{
-    // 计算欧氏距离. 欧氏距离值越低, 两个向量距离越近.
+pub fn squared_euclidean_l2_distance(a: &[f32], b: &[f32]) -> f32{
+    // 计算没有开方的欧氏距离. 欧氏距离值越低, 两个向量距离越近.
     assert_eq!(a.len(), b.len(), "dimension mismatch");
     let mut sum = 0.0f32;       
     for (x, y) in a.iter().zip(b.iter()) {
         sum += (x - y) * (x - y);
     }
-    sum.sqrt()
+    //sum.sqrt()
+    sum
 }

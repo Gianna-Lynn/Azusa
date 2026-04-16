@@ -1,7 +1,7 @@
 use core::f32;
 use rand::{Rng, SeedableRng};
 use rand::rngs::{StdRng};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, BinaryHeap};
 use std::f32::{INFINITY};
 
 use crate::distance;
@@ -386,6 +386,36 @@ impl HnswIndex {
         min_elem_id
     }
 
+    pub fn get_furthest_v2(
+        &self,
+        alive_set: &HashSet<Id>,
+        heap: &mut BinaryHeap<(std::cmp::Reverse<ordered_float::NotNan<f32>>, Id)>,
+        ) -> Option<Id> {
+
+        while let Some(top) = heap.pop() {
+            if !alive_set.contains(&top.1){
+                continue;
+            }
+            return Some(top.1);
+        }
+        None
+    }
+
+    pub fn get_nearest_v2(
+        &self,
+        alive_set: &HashSet<Id>,
+        heap: &mut BinaryHeap<(ordered_float::NotNan<f32>, Id)>,
+        ) -> Option<Id> {
+
+        while let Some(top) = heap.pop() {
+            if !alive_set.contains(&top.1){
+                continue;
+            }
+            return Some(top.1);
+        }
+        None
+    }
+
 
     pub fn get_neighbors_at_lvl(&self, id: Id, lvl: usize) -> HashSet<Id> {
         //ご注意ください:如果你用的是一个不带有&self的静态方法,方法不能访问self.nodes,不能访问索引内部的图结构,只能依靠传入的参数工作.
@@ -434,32 +464,39 @@ impl HnswIndex {
         entry_id: Id,
         level: usize,
         ef: usize,
+        id_similarity_cache: &mut HashMap<Id, f32>,
     ) -> HashSet<Id> {
         assert!(ef >= 1, "ef至少为1");
 
-        let mut id_similarity_cache: HashMap<Id, f32> = HashMap::new();
+        //let mut id_similarity_cache: HashMap<Id, f32> = HashMap::new();
 
         //已经访问过的节点集合v
         let mut v_set: HashSet<Id> = HashSet::new();
         //候选集合C (大地图)
         let mut c_set: HashSet<Id> = HashSet::new();
+        let mut c_heap: BinaryHeap<(ordered_float::NotNan<f32>, Id)> = BinaryHeap::new();
         //目前找到的最近点集合W
         let mut w_set: HashSet<Id> = HashSet::new();
 
         //ご注意ください:初始化时要把entry_id放进这三个集合,否则一开始集合为空,后面的逻辑都不会执行.
         v_set.insert(entry_id);
         c_set.insert(entry_id);
+
+        // 初始化 c_heap：计算 entry_id 的相似度并推入堆
+        let entry_similarity = self.get_similarity(id_similarity_cache, &entry_id, query);
+        c_heap.push((ordered_float::NotNan::new(entry_similarity).unwrap(), entry_id));
+
         w_set.insert(entry_id);
 
         while !c_set.is_empty() {
-            //ご注意ください:get方法是查看, 要完成"拿出来+删掉", 就需要一个额外的删除语句: .remove
-            let c_id = self.get_nearest_v1(&mut id_similarity_cache, &c_set, query).expect("c_id不存在");
+            //ご注意ください:get方法是查看, 要完成"拿出来+删掉", 就需要一个額外的删除语句: .remove
+            let c_id = self.get_nearest_v2(&c_set, &mut c_heap).expect("c_id不存在");
             c_set.remove(&c_id);
             //ご注意ください:get方法是查看, 要完成"拿出来读取", 而不是删掉.
-            let mut f_id = self.get_furthest_v1(&mut id_similarity_cache, &w_set, query).expect("f_id不存在");
+            let mut f_id = self.get_furthest_v1(id_similarity_cache, &w_set, query).expect("f_id不存在");
             // 逻辑:similarity的值: 两个向量距离越近, similarity的值越大.不要写反了.
-            if self.get_similarity(&mut id_similarity_cache, &c_id, query)
-                < self.get_similarity(&mut id_similarity_cache, &f_id, query)
+            if self.get_similarity(id_similarity_cache, &c_id, query)
+                < self.get_similarity(id_similarity_cache, &f_id, query)
             {
                 break;
             }
@@ -475,17 +512,20 @@ impl HnswIndex {
                 }
                 v_set.insert(e_id);
 
-                f_id = self.get_furthest_v1(&mut id_similarity_cache, &w_set, query).expect("f_id不存在");
+                f_id = self.get_furthest_v1(id_similarity_cache, &w_set, query).expect("f_id不存在");
         
                 // 逻辑:similarity的值: 两个向量距离越近, similarity的值越大.不要写反了.
-                if self.get_similarity(&mut id_similarity_cache, &e_id, query)
-                    >= self.get_similarity(&mut id_similarity_cache, &f_id, query)
+                if self.get_similarity(id_similarity_cache, &e_id, query)
+                    >= self.get_similarity(id_similarity_cache, &f_id, query)
                     || w_set.len() < ef
                 {
                     c_set.insert(e_id);
+                    // 计算相似度并推入 c_heap
+                    let e_similarity = self.get_similarity(id_similarity_cache, &e_id, query);
+                    c_heap.push((ordered_float::NotNan::new(e_similarity).unwrap(), e_id));
                     w_set.insert(e_id);
                     if w_set.len() > ef {
-                        let id_to_remove_op = self.get_furthest_v1(&mut id_similarity_cache, &w_set, query);
+                        let id_to_remove_op = self.get_furthest_v1(id_similarity_cache, &w_set, query);
                         if let Some(id_to_remove) = id_to_remove_op {
                             w_set.remove(&id_to_remove);
                         }
@@ -544,7 +584,8 @@ impl HnswIndex {
             current_entry_id = self.greedy_search_at_level(query, current_entry_id, lvl);
         }
         //第0层使用带候选集的精细搜索
-        let candidate_set = self.search_layer_v0(query, current_entry_id, 0, ef_search);
+        let mut id_similarity_cache: HashMap<Id, f32> = HashMap::new();
+        let candidate_set = self.search_layer_v0(query, current_entry_id, 0, ef_search, &mut id_similarity_cache);
         let mut candidate_sequence: Vec<Id> = candidate_set.into_iter().collect();
         //into_iter消费了candidate_set, 以后就不能用了.
 
@@ -594,8 +635,10 @@ impl HnswIndex {
         for lvl in (1..=*current_node.get_node_max_level()).rev() {
             current_entry_id = self.greedy_search_at_level(query, current_entry_id, lvl);
         }
-        let candidate_set = self.search_layer_v0(query, current_entry_id, 0, ef_search);
+
         let mut id_similarity_cache: HashMap<Id, f32> = HashMap::new();
+        let candidate_set = self.search_layer_v0(query, current_entry_id, 0, ef_search, &mut id_similarity_cache);
+        
         let mut candidate_sequence: Vec<Id> = candidate_set.into_iter().collect();
         candidate_sequence.sort_by(|id1, id2| {
             let score1 = self.get_similarity(&mut id_similarity_cache, id1, query);
@@ -642,7 +685,7 @@ impl HnswIndex {
         // 创建节点
         let data_copy = data.clone();
         let new_node = HnswNode::new(id, data_copy, new_node_level);
-
+        let mut id_similarity_cache: HashMap<Id, f32> = HashMap::new();
         // Case 1: 
         // 若图为空：
         if self.is_empty(){
@@ -732,7 +775,7 @@ impl HnswIndex {
             /**************************************** line 9 获得候选集合 W_set **************************************************/
             // 在会出现新节点的层上, 需要扩大搜索范围, ef不再只是1.
             // 不同于前面在更高层上搜索时的粗搜, 这里需要在新节点所在层上进行精搜, 以便得到一个更大的候选集合.因此ef的值应该大于1.
-            let w_set = self.search_layer_v0(&data, entry_point_id, current_lvl, ef_construction);
+            let w_set = self.search_layer_v0(&data, entry_point_id, current_lvl, ef_construction,&mut id_similarity_cache);
             
             /**************************************** line 10 从候选中选出最多 M 个邻居 **************************************************/
             // TODO: 可优化: 引入启发式
@@ -863,6 +906,7 @@ impl HnswIndex {
         let new_node_level = *level;
         let data_copy = data.clone();
         let new_node = HnswNode::new(id, data_copy, new_node_level);
+        let mut id_similarity_cache: HashMap<Id, f32> = HashMap::new();
         if self.is_empty() {
             self.entry_node_id = Some(id);
             self.index_max_level = new_node_level;
@@ -880,7 +924,7 @@ impl HnswIndex {
         }
         let min_level = std::cmp::min(self.index_max_level, new_node_level);
         for current_lvl in (0..=min_level).rev() {
-            let w_set = self.search_layer_v0(&data, entry_point_id, current_lvl, ef_construction);
+            let w_set = self.search_layer_v0(&data, entry_point_id, current_lvl, ef_construction, &mut id_similarity_cache);
             let neighbors_set = &self.select_neighbors_simple(&w_set, &data, m);
             for neighbor_node_id in neighbors_set {
                 self.add_neighbor_to_node_at_level(id, *neighbor_node_id, current_lvl);

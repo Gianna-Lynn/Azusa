@@ -9,20 +9,20 @@ use toy_vector_db::{
 };
 
 /// id: u64, data: Vec<f32>, lvl: usize
-/// v1 版本的构图 helper
-fn build_index_v1(nodes_data: Vec<(u64, Vec<f32>, usize)>) -> HnswIndex {
+/// 构图 helper
+fn build_index(nodes_data: Vec<(u64, Vec<f32>, usize)>) -> HnswIndex {
     let mut index = HnswIndex::new();
     let ef_construction = 10;
     let m = 2;
     let m_max = 4;
     for (id, data, level) in nodes_data.iter() {
-        index.insert_v1_fixed_level(*id, data.clone(), ef_construction, m, m_max, level);
+        index.insert_fixed_level(*id, data.clone(), ef_construction, m, m_max, level);
     }
     index
 }
 
 
-fn expected_search_knn_v1_ids(case: &HnswTestCase) -> Vec<Id> {
+fn expected_search_knn_ids(case: &HnswTestCase) -> Vec<Id> {
     let mut scored_ids: Vec<(Id, f32)> = case
         .nodes_data
         .iter()
@@ -48,8 +48,8 @@ fn expected_search_knn_v1_ids(case: &HnswTestCase) -> Vec<Id> {
         .collect()
 }
 
-fn assert_search_knn_v1_case(case_name: &str, case: HnswTestCase) {
-    let expected_result_ids = expected_search_knn_v1_ids(&case);
+fn assert_search_knn_case(case_name: &str, case: HnswTestCase) {
+    let expected_result_ids = expected_search_knn_ids(&case);
     let HnswTestCase {
         nodes_data,
         query,
@@ -57,8 +57,8 @@ fn assert_search_knn_v1_case(case_name: &str, case: HnswTestCase) {
         ef_search,
         ..
     } = case;
-    let index = build_index_v1(nodes_data);
-    let result_ids = index.search_knn_v1(&query, k, ef_search);
+    let index = build_index(nodes_data);
+    let result_ids = index.search_knn(&query, k, ef_search);
 
     assert_eq!(
         result_ids, expected_result_ids,
@@ -67,9 +67,9 @@ fn assert_search_knn_v1_case(case_name: &str, case: HnswTestCase) {
     );
 }
 
-fn run_search_knn_v1_case(case_name: &str, case: HnswTestCase) -> Result<(), String> {
+fn run_search_knn_case(case_name: &str, case: HnswTestCase) -> Result<(), String> {
     let result = catch_unwind(AssertUnwindSafe(|| {
-        assert_search_knn_v1_case(case_name, case);
+        assert_search_knn_case(case_name, case);
     }));
 
     match result {
@@ -87,22 +87,22 @@ fn run_search_knn_v1_case(case_name: &str, case: HnswTestCase) -> Result<(), Str
 }
 
 #[test]
-fn test_search_knn_v1() {
-    test_search_knn_v1_empty_case();
-    test_search_knn_v1_single_node_case();
-    test_search_knn_v1_unique_ranking_case();
+fn test_search_knn() {
+    test_search_knn_empty_case();
+    test_search_knn_single_node_case();
+    test_search_knn_unique_ranking_case();
 }
 
 #[test]
-fn test_search_knn_v1_empty_case() {
+fn test_search_knn_empty_case() {
     // 空图应返回空结果
     let case = empty_case();
-    let index = build_index_v1(case.nodes_data);
+    let index = build_index(case.nodes_data);
     let test_query = case.query;
 
     println!("Test C get_entry_node_id is:");
     println!("{:#?}", index.get_entry_node_id());
-    let result_vector = index.search_knn_v1(&test_query, 3, 3);
+    let result_vector = index.search_knn(&test_query, 3, 3);
     assert!(result_vector.is_empty(), "空图应返回空结果");
 
     println!("Test C result_vector is:");
@@ -110,12 +110,12 @@ fn test_search_knn_v1_empty_case() {
 }
 
 #[test]
-fn test_search_knn_v1_single_node_case() {
+fn test_search_knn_single_node_case() {
     // 单节点只应返回它自己
     let case = single_node_case();
-    let index = build_index_v1(case.nodes_data);
+    let index = build_index(case.nodes_data);
     let test_query = case.query;
-    let result_vector = index.search_knn_v1(&test_query, 3, 3);
+    let result_vector = index.search_knn(&test_query, 3, 3);
     assert_eq!(result_vector.len(), 1);
     let expected_result_id = case
         .expected_result_id
@@ -127,12 +127,12 @@ fn test_search_knn_v1_single_node_case() {
 }
 
 #[test]
-fn test_search_knn_v1_unique_ranking_case() {
+fn test_search_knn_unique_ranking_case() {
     // 结果数量和排序都要对
     let case = unique_ranking_case();
-    let index = build_index_v1(case.nodes_data);
+    let index = build_index(case.nodes_data);
     let test_query = case.query;
-    let result_vector = index.search_knn_v1(&test_query, 3, 3);
+    let result_vector = index.search_knn(&test_query, 3, 3);
     assert!(result_vector.len() <= case.k, "结果数量不应超过 k");
     let expected_result_id = case
         .expected_result_id
@@ -157,7 +157,7 @@ fn test_search_knn_v1_unique_ranking_case() {
 }
 
 #[test]
-fn test_search_knn_v1_exact_cases() {
+fn test_search_knn_exact_cases() {
     let cases = [
         ("empty_case", empty_case as fn() -> HnswTestCase),
         ("single_node_case", single_node_case as fn() -> HnswTestCase),
@@ -180,8 +180,8 @@ fn test_search_knn_v1_exact_cases() {
     let mut failures = Vec::new();
 
     for (case_name, case_fn) in cases {
-        println!("running search_knn_v1 case: {}", case_name);
-        if let Err(message) = run_search_knn_v1_case(case_name, case_fn()) {
+        println!("running search_knn case: {}", case_name);
+        if let Err(message) = run_search_knn_case(case_name, case_fn()) {
             eprintln!("case failed: {}", message);
             failures.push(message);
         }
@@ -189,18 +189,18 @@ fn test_search_knn_v1_exact_cases() {
 
     assert!(
         failures.is_empty(),
-        "search_knn_v1 exact cases failed:\n{}",
+        "search_knn exact cases failed:\n{}",
         failures.join("\n")
     );
 }
 
 #[test]
-fn test_search_knn_v1_multilevel_case() {
-    assert_search_knn_v1_case("multilevel_case", multilevel_case());
+fn test_search_knn_multilevel_case() {
+    assert_search_knn_case("multilevel_case", multilevel_case());
 }
 
 #[test]
-fn test_insert_v1_single_node_minimal() {
+fn test_insert_single_node_minimal() {
     // 单节点插入
     let mut index = HnswIndex::new();
     assert!(index.is_empty(), "初始图应为空");
@@ -211,7 +211,7 @@ fn test_insert_v1_single_node_minimal() {
     let m = 2;
     let m_max = 4;
 
-    index.insert_v1(id, data, ef, m, m_max);
+    index.insert(id, data, ef, m, m_max);
 
     assert_eq!(index.len(), 1, "插入一个点后，图大小应为1");
 
@@ -231,7 +231,7 @@ fn test_insert_v1_single_node_minimal() {
 }
 
 #[test]
-fn test_insert_v1_two_nodes_minimal() {
+fn test_insert_two_nodes_minimal() {
     // 两个节点至少要在某一层互相可达
     let mut index = HnswIndex::new();
 
@@ -244,10 +244,10 @@ fn test_insert_v1_two_nodes_minimal() {
     let m = 2;
     let m_max = 4;
 
-    index.insert_v1(id1, data1, ef, m, m_max);
+    index.insert(id1, data1, ef, m, m_max);
     assert_eq!(index.len(), 1, "第一次插入后大小应为1");
 
-    index.insert_v1(id2, data2, ef, m, m_max);
+    index.insert(id2, data2, ef, m, m_max);
     assert_eq!(index.len(), 2, "第二次插入后大小应为2");
 
     let node1 = index.get_node_by_id(id1).expect("节点1不存在");
@@ -285,7 +285,7 @@ fn test_insert_v1_two_nodes_minimal() {
 }
 
 #[test]
-fn test_insert_v1_multiple_nodes_connected() {
+fn test_insert_multiple_nodes_connected() {
     // 多个节点插入后，图里不应出现孤点
     let mut index = HnswIndex::new();
 
@@ -301,7 +301,7 @@ fn test_insert_v1_multiple_nodes_connected() {
     let m_max = 4;
 
     for (id, data) in nodes_data.iter() {
-        index.insert_v1(*id, data.clone(), ef, m, m_max);
+        index.insert(*id, data.clone(), ef, m, m_max);
     }
 
     for (id, _) in nodes_data.iter() {
@@ -330,8 +330,8 @@ fn test_insert_v1_multiple_nodes_connected() {
 #[test]
 fn test_tricky_identical_vectors() {
     let case = identical_vectors_case();
-    let index = build_index_v1(case.nodes_data);
-    let result_vector = index.search_knn_v1(&case.query, case.k, case.ef_search);
+    let index = build_index(case.nodes_data);
+    let result_vector = index.search_knn(&case.query, case.k, case.ef_search);
     assert_eq!(
         result_vector.len(),
         2,
@@ -346,8 +346,8 @@ fn test_tricky_identical_vectors() {
 #[test]
 fn test_tricky_duplicate_distance() {
     let case = duplicate_distance_case();
-    let index = build_index_v1(case.nodes_data);
-    let result_vector = index.search_knn_v1(&case.query, case.k, case.ef_search);
+    let index = build_index(case.nodes_data);
+    let result_vector = index.search_knn(&case.query, case.k, case.ef_search);
     assert_eq!(
         result_vector.as_slice(),
         &[1, 2, 3],
@@ -358,8 +358,8 @@ fn test_tricky_duplicate_distance() {
 #[test]
 fn test_tricky_collinear_points() {
     let case = collinear_points_case();
-    let index = build_index_v1(case.nodes_data);
-    let result_vector = index.search_knn_v1(&case.query, case.k, case.ef_search);
+    let index = build_index(case.nodes_data);
+    let result_vector = index.search_knn(&case.query, case.k, case.ef_search);
     assert_eq!(
         result_vector.as_slice(),
         &[1, 2],
@@ -370,8 +370,8 @@ fn test_tricky_collinear_points() {
 #[test]
 fn test_tricky_clustered_distribution() {
     let case = clustered_distribution_case();
-    let index = build_index_v1(case.nodes_data);
-    let result_vector = index.search_knn_v1(&case.query, case.k, case.ef_search);
+    let index = build_index(case.nodes_data);
+    let result_vector = index.search_knn(&case.query, case.k, case.ef_search);
     assert_eq!(
         result_vector.as_slice(),
         &[1, 2, 3],
@@ -382,8 +382,8 @@ fn test_tricky_clustered_distribution() {
 #[test]
 fn test_tricky_high_dimension() {
     let case = high_dimension_case();
-    let index = build_index_v1(case.nodes_data);
-    let result_vector = index.search_knn_v1(&case.query, case.k, case.ef_search);
+    let index = build_index(case.nodes_data);
+    let result_vector = index.search_knn(&case.query, case.k, case.ef_search);
     assert_eq!(
         result_vector.first().copied(),
         case.expected_result_id,
@@ -395,8 +395,8 @@ fn test_tricky_high_dimension() {
 #[test]
 fn test_tricky_extreme_values() {
     let case = extreme_values_case();
-    let index = build_index_v1(case.nodes_data);
-    let result_vector = index.search_knn_v1(&case.query, case.k, case.ef_search);
+    let index = build_index(case.nodes_data);
+    let result_vector = index.search_knn(&case.query, case.k, case.ef_search);
     assert_eq!(
         result_vector.first().copied(),
         case.expected_result_id,
@@ -408,8 +408,8 @@ fn test_tricky_extreme_values() {
 #[test]
 fn test_tricky_near_zero_distance() {
     let case = near_zero_distance_case();
-    let index = build_index_v1(case.nodes_data);
-    let result_vector = index.search_knn_v1(&case.query, case.k, case.ef_search);
+    let index = build_index(case.nodes_data);
+    let result_vector = index.search_knn(&case.query, case.k, case.ef_search);
     assert_eq!(
         result_vector.first().copied(),
         case.expected_result_id,
@@ -421,8 +421,8 @@ fn test_tricky_near_zero_distance() {
 #[test]
 fn test_tricky_k_larger_than_dataset() {
     let case = k_larger_than_dataset_case();
-    let index = build_index_v1(case.nodes_data);
-    let result_vector = index.search_knn_v1(&case.query, case.k, case.ef_search);
+    let index = build_index(case.nodes_data);
+    let result_vector = index.search_knn(&case.query, case.k, case.ef_search);
     assert_eq!(
         result_vector.len(),
         3,
@@ -433,8 +433,8 @@ fn test_tricky_k_larger_than_dataset() {
 #[test]
 fn test_tricky_tightly_packed() {
     let case = tightly_packed_case();
-    let index = build_index_v1(case.nodes_data);
-    let result_vector = index.search_knn_v1(&case.query, case.k, case.ef_search);
+    let index = build_index(case.nodes_data);
+    let result_vector = index.search_knn(&case.query, case.k, case.ef_search);
     assert_eq!(
         result_vector.first().copied(),
         case.expected_result_id,
@@ -446,8 +446,8 @@ fn test_tricky_tightly_packed() {
 #[test]
 fn test_tricky_extreme_ef_search() {
     let case = extreme_ef_search_case();
-    let index = build_index_v1(case.nodes_data);
-    let result_vector = index.search_knn_v1(&case.query, case.k, case.ef_search);
+    let index = build_index(case.nodes_data);
+    let result_vector = index.search_knn(&case.query, case.k, case.ef_search);
     assert_eq!(
         result_vector.first().copied(),
         case.expected_result_id,
@@ -459,8 +459,8 @@ fn test_tricky_extreme_ef_search() {
 #[test]
 fn test_tricky_negative_coordinates() {
     let case = negative_coordinates_case();
-    let index = build_index_v1(case.nodes_data);
-    let result_vector = index.search_knn_v1(&case.query, case.k, case.ef_search);
+    let index = build_index(case.nodes_data);
+    let result_vector = index.search_knn(&case.query, case.k, case.ef_search);
     assert_eq!(
         result_vector.first().copied(),
         case.expected_result_id,
@@ -472,8 +472,8 @@ fn test_tricky_negative_coordinates() {
 #[test]
 fn test_tricky_sparse_vectors() {
     let case = sparse_vectors_case();
-    let index = build_index_v1(case.nodes_data);
-    let result_vector = index.search_knn_v1(&case.query, case.k, case.ef_search);
+    let index = build_index(case.nodes_data);
+    let result_vector = index.search_knn(&case.query, case.k, case.ef_search);
     assert_eq!(
         result_vector.first().copied(),
         case.expected_result_id,

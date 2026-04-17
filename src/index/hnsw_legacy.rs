@@ -5,11 +5,11 @@ use crate::types::{Id, Vector};
 use super::HnswIndex;
 
 impl HnswIndex {
-    // 基线: legacy / v1 helper.
+    // 基线: 缓存版 helper.
     // 基线: 方法=线性扫描 HashSet
     // 基线: 相似度来源=通过 id_similarity_cache 复用/缓存 get_similarity 结果
     // 基线: 适用场景=已经有“节点到当前 query 的相似度缓存”时，找集合中最近点
-    pub fn get_nearest_v1(&self, id_similarity_cache: &mut std::collections::HashMap<Id, f32>, set: &HashSet<Id>, query: &Vector) -> Option<Id> {
+    pub fn get_nearest(&self, id_similarity_cache: &mut std::collections::HashMap<Id, f32>, set: &HashSet<Id>, query: &Vector) -> Option<Id> {
         let mut max_similarity = f32::NEG_INFINITY;
         let mut max_elem_id: Option<Id> = None;
 
@@ -23,11 +23,11 @@ impl HnswIndex {
         max_elem_id
     }
 
-    // 基线: legacy / v1 helper.
+    // 基线: 缓存版 helper.
     // 基线: 方法=线性扫描 HashSet
     // 基线: 相似度来源=通过 id_similarity_cache 复用/缓存 get_similarity 结果
     // 基线: 适用场景=已经有“节点到当前 query 的相似度缓存”时，找集合中最远点
-    pub fn get_furthest_v1(&self, id_similarity_cache: &mut std::collections::HashMap<Id, f32>, set: &HashSet<Id>, query: &Vector) -> Option<Id> {
+    pub fn get_furthest(&self, id_similarity_cache: &mut std::collections::HashMap<Id, f32>, set: &HashSet<Id>, query: &Vector) -> Option<Id> {
         let mut min_similarity = f32::INFINITY;
         let mut min_elem_id: Option<Id> = None;
 
@@ -41,9 +41,9 @@ impl HnswIndex {
         min_elem_id
     }
 
-    // 基线: v0.
+    // 基线: 早期版本.
     // 基线: 沿着第 0 层做贪心搜索。
-    pub fn search_v0(&self, query: &Vector) -> Option<Id> {
+    pub fn search_greedy(&self, query: &Vector) -> Option<Id> {
         if self.is_empty() {
             return None;
         }
@@ -75,9 +75,9 @@ impl HnswIndex {
         }
     }
 
-    // 基线: v0.
+    // 基线: 早期版本.
     // 基线: 在线性扫描中找最近点。
-    pub fn get_nearest_v0(&self, set: &HashSet<Id>, query: &Vector) -> Option<Id> {
+    pub fn get_nearest_naive(&self, set: &HashSet<Id>, query: &Vector) -> Option<Id> {
         let mut max_similarity = f32::NEG_INFINITY;
         let mut max_elem_id: Option<Id> = None;
 
@@ -92,9 +92,9 @@ impl HnswIndex {
         max_elem_id
     }
 
-    // 基线: v0.
+    // 基线: 早期版本.
     // 基线: 在线性扫描中找最远点。
-    pub fn get_furthest_v0(&self, set: &HashSet<Id>, query: &Vector) -> Option<Id> {
+    pub fn get_furthest_naive(&self, set: &HashSet<Id>, query: &Vector) -> Option<Id> {
         let mut min_similarity = f32::INFINITY;
         let mut min_elem_id: Option<Id> = None;
 

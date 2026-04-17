@@ -1,7 +1,7 @@
 mod datasets;
 mod common;
 use datasets::*;
-use common::{build_index_v1, ideal_answer_generator};
+use common::{build_index, ideal_answer_generator};
 
 use toy_vector_db::types::Id;
 
@@ -19,15 +19,15 @@ use toy_vector_db::types::Id;
 // /// id: u64, data: Vec<f32>, lvl: usize
 // /// v1 版本的构图 helper, 复制自hnsw_test_v1.rs
 // /// 人为指定每个节点所在的层次.
-// fn build_index_v1(nodes_data: Vec<(u64, Vec<f32>, usize)>, ef_construction: usize, m: usize, m_max: usize) -> HnswIndex {
+// fn build_index(nodes_data: Vec<(u64, Vec<f32>, usize)>, ef_construction: usize, m: usize, m_max: usize) -> HnswIndex {
 //     let mut index = HnswIndex::new();
 //     for (id, data, level) in nodes_data.iter() {
-//         index.insert_v1_fixed_level(*id, data.clone(), ef_construction, m, m_max, level);
+//         index.insert_fixed_level(*id, data.clone(), ef_construction, m, m_max, level);
 //     }
 //     index
 // }
 
-// // debug: 这个地方的expected_list最好完全独立于build_index_v1.
+// // debug: 这个地方的expected_list最好完全独立于build_index.
 // //        也就是说, 不要从index中取结果, 而是直接从HnswTestCase中取结果.
 // fn ideal_answer_generator(case: &HnswTestCase, query: &Vector, top_k: usize) -> Vec<Id>{
 //     // 按暴力 similarity 排序后的理想 id 列表
@@ -172,7 +172,7 @@ fn experiment_param_sweep(){
                 // 对每个 case：
                 // 算 expected
                 // 用当前参数建图
-                // 用当前 ef_search 调 search_knn_v1_from_entry_for_experiment(...)
+                // 用当前 ef_search 调 search_knn_from_entry_for_experiment(...)
                 // 比较结果
 
                 // debug: 如果先let index, 后let expected_list: 前者利用值传递拿走了case.nodes_data, 后者想要整体借用case, rust不允许"部分字段已经被搬走后还想借用整个结构体"
@@ -180,10 +180,10 @@ fn experiment_param_sweep(){
                 //        解决方法更正: 第二步拿走case.nodes_data还不行,改成了clone()
                 let expected_list = ideal_answer_generator(&case, &case.query, case.k);
                 
-                let index = build_index_v1(case.nodes_data.clone(), ef_construction, m, m_max);
-                // debug: 这个地方的expected_list最好完全独立于build_index_v1.
+                let index = build_index(case.nodes_data.clone(), ef_construction, m, m_max);
+                // debug: 这个地方的expected_list最好完全独立于build_index.
                 // let expected_list = ideal_answer_generator(&index, &case.query, case.k);
-                let search_result_list = index.search_knn_v1_from_entry_for_experiment(case.entry_id, &case.query,  case.k, ef_search);
+                let search_result_list = index.search_knn_from_entry_for_experiment(case.entry_id, &case.query,  case.k, ef_search);
                 let search_result_list_len = search_result_list.len();
                 // 3
                 // 定义两个判断：

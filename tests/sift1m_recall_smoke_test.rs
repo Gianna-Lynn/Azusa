@@ -141,9 +141,9 @@ fn run_hnsw_in_sift1m_case(
             // 狸花: 优化性能. 不再重复计算暴力搜索, 而是直接从预计算的结果中获取.
             // let brute_force = exact_top_k(&base_vecs, &query, k, TEST_METRIC);
             let search_start = Instant::now();
-            // 狸花: 优化性能. 直接传递 &Vec<f32> (query_vec), search_knn_v1 会自动解引用为 &[f32].
-            let search_result_ids = index.search_knn_v1(query_vec, k, *ef_search_num);
-            println!("  query[{}/{}] ef_search={} search_knn_v1 took: {:?}", cnt, query_limit, ef_search_num, search_start.elapsed());
+            // 狸花: 优化性能. 直接传递 &Vec<f32> (query_vec), search_knn 会自动解引用为 &[f32].
+            let search_result_ids = index.search_knn(query_vec, k, *ef_search_num);
+            println!("  query[{}/{}] ef_search={} search_knn took: {:?}", cnt, query_limit, ef_search_num, search_start.elapsed());
             // 狸花: 优化性能. 直接从预计算的 all_brute_force_ids 中通过索引获取真值.
             let brute_force_ids = &all_brute_force_ids[idx];
 
@@ -220,9 +220,9 @@ fn run_sift1m_recall_case(
     println!("build_index took: {:?}", build_start.elapsed());
     let search_start = Instant::now();
     // 狸花: 优化性能.
-    // search_knn_v1 的参数是 &[f32], query 是 &Vec<f32>, Rust 会自动解引用.
-    let search_result = index.search_knn_v1(query, k, ef_search);
-    println!("search_knn_v1 took: {:?}", search_start.elapsed());
+    // search_knn 的参数是 &[f32], query 是 &Vec<f32>, Rust 会自动解引用.
+    let search_result = index.search_knn(query, k, ef_search);
+    println!("search_knn took: {:?}", search_start.elapsed());
 
     //打印向量本体
     //println!("query is {:?}",query);
@@ -273,7 +273,7 @@ pub fn exact_top_k(base_vecs: &[Vec<f32>], query: &[f32], k: usize, metric: Metr
 fn build_index(base_vecs: &[Vec<f32>], params: HnswBuildParams) -> HnswIndex {
     let mut index = HnswIndex::new_with_metric(TEST_METRIC);
     println!(
-        "insert_v1 params: ef_construction={}, m={}, m_max={}",
+        "insert params: ef_construction={}, m={}, m_max={}",
         params.ef_construction,
         params.m,
         params.m_max
@@ -281,7 +281,7 @@ fn build_index(base_vecs: &[Vec<f32>], params: HnswBuildParams) -> HnswIndex {
 
     for (id, base_vec) in base_vecs.iter().enumerate() {
         // 认为每一条向量的数组下标序号就是它的id.
-        index.insert_v1(
+        index.insert(
             id as u64,
             base_vec.clone(),
             params.ef_construction,
@@ -352,7 +352,7 @@ fn run_hnsw_in_sift1m_case_groundtruth(
         // valid_query_cnt 表示“真正纳入 recall/exact 统计的 query 数”   
         valid_query_cnt += 1;
         let search_start = Instant::now();
-        let search_result_ids = index.search_knn_v1(&query_vec, k, ef_search);
+        let search_result_ids = index.search_knn(&query_vec, k, ef_search);
         println!("query[{}] search took: {:?}", query_idx, search_start.elapsed());
         total_search_time += search_start.elapsed();
         let search_result_ids_u32: Vec<u32> = search_result_ids.iter().map(|&id| id as u32).collect();

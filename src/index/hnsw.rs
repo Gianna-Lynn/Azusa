@@ -3,13 +3,17 @@ use std::time::Instant;
 use rand::{Rng, SeedableRng};
 use rand::rngs::{StdRng};
 use std::collections::{HashMap, HashSet, BinaryHeap};
-use std::f32::{INFINITY};
-
 use crate::distance;
 use crate::types::{Id, Metric, Vector};
 
+#[path = "hnsw_legacy.rs"]
+mod hnsw_legacy;
+#[path = "hnsw_experiment.rs"]
+mod hnsw_experiment;
+
 const MY_SEED : u64 = 42;
 
+// 统计: 插入和搜索过程中的时间开销, 方便定位性能热点.
 #[derive(Debug, Default)]
 pub struct SearchLayerStats {
     pub compute_sim_ns: u128,
@@ -42,6 +46,7 @@ pub enum HeapAccessMode {
     PopAlive,
 }
 
+// 结构: HNSW 主索引结构, 负责保存图、入口点、层高和统计信息.
 #[derive(Debug)]
 pub struct HnswIndex {
     nodes: Vec<HnswNode>, //保存当前图中所有节点
@@ -54,6 +59,7 @@ pub struct HnswIndex {
     rng: StdRng,
     timing: InsertTimings,
 }
+// 结构: 图中的单个节点, 保存 id、向量本体、层高和每层邻居表.
 #[derive(Debug, Clone)]
 pub struct HnswNode {
     id: Id,
@@ -66,6 +72,7 @@ pub struct HnswNode {
 }
 
 impl HnswNode {
+    // 避坑: 初始化节点时, 需要按层创建空邻居表, 避免后续插边越界.
     pub fn new(id: Id, data: Vector, level: usize) -> Self {
         // self.neighbors = Vec::new();
         // for (int i = 0; i < self.level; i++){
@@ -85,7 +92,7 @@ impl HnswNode {
         }
     }
 
-    //给某个节点的某一层添加一个邻居 id."我自己这一层加一个邻居"
+    // 连边: 给某个节点的某一层添加一个邻居 id, 用于局部连边.
     pub fn add_neighbor(&mut self, neighbor_id: Id, level_to_add: usize) {
         //self.neighbors[neighbor_lvl].append(neighbor_id); //append是拿来“把一个 Vec 里的所有元素接到另一个 Vec 后面”的。它要的不是一个单独的 Id，而是一个 Vec<Id>。
         if level_to_add < self.neighbors.len() {
@@ -93,6 +100,7 @@ impl HnswNode {
         }
     }
 
+    // 剪枝: 从当前节点的所有层里删除某个邻居, 用于剪枝时的单向清理.
     pub fn delete_neighbor_single_direction_at_all_levels(&mut self, neighbor_id: Id){
         // pub struct HnswNode {
         //     id: Id,
@@ -111,6 +119,7 @@ impl HnswNode {
         }
     }
 
+    // 剪枝: 从当前节点的指定层删除某个邻居, 用于局部剪枝.
     pub fn delete_neighbor_single_direction_at_level(&mut self, neighbor_id: Id, level: usize){
         self.neighbors[level].retain(|&id| id != neighbor_id);
     }
@@ -135,8 +144,7 @@ impl HnswNode {
 }
 
 impl HnswIndex {
-    // 关联函数: 不依赖具体对象,不需要self参数
-    // 实例方法: 依赖对象当前的状态,必须有&self参数
+    // 初始化: 创建默认索引实例, 使用固定随机种子确保构图可复现.
     pub fn new() -> Self {
         Self {
             nodes: Vec::new(),
@@ -149,6 +157,7 @@ impl HnswIndex {
         }
     }
 
+    // 初始化: 创建指定 metric 的索引实例, 方便在 Cosine 和 L2 之间切换.
     pub fn new_with_metric(metric: Metric) -> Self {
         Self {
             nodes: Vec::new(),
@@ -161,6 +170,7 @@ impl HnswIndex {
         }
     }
 
+    // 统计: 打印插入阶段的计时拆分, 用来判断瓶颈落在哪一步.
     pub fn print_timings(&self) {
         let total = self.timing.search_layer_ns
             + self.timing.greedy_search_ns
@@ -214,6 +224,7 @@ impl HnswIndex {
         println!("  total:             {:.2}s\n", total as f64 / 1e9);
     }
 
+    // 统一: 统一相似度计算入口, 保证索引内部所有比较都走同一 metric.
     pub fn compute_similarity(&self, a: &Vector, b:&Vector)->f32{
         distance::similarity(a, b, self.metric)
     }
@@ -228,6 +239,7 @@ impl HnswIndex {
         return self.nodes.is_empty();
     }
 
+    // 基线: 早期插入逻辑, 现在更多是历史/对照用途, 保留供参考.
     pub fn insert(&mut self, mut node_to_insert: HnswNode) {
         if self.is_empty() {
             self.entry_node_id = Some(node_to_insert.id); // 不清楚为什么要加这个Some()
@@ -360,138 +372,7 @@ impl HnswIndex {
         self.entry_node_id
     }
 
-    pub fn search_v0(&self, query: &Vector) -> Option<Id> {
-        if self.is_empty() {
-            return None;
-        }
-        //如果图非空
-        //let mut search_id_opt = self.entry_node_id;
-
-        //改进逻辑,省去loop内部的match search_id_opt的分支.直接利用current_id.
-        let mut current_id = if let Some(id) = self.entry_node_id {
-            id
-        } else {
-            return None;
-        };
-        loop {
-            // match search_id_opt{
-            //     Some(search_id) =>{
-            if let Some(node_to_search) = self.get_node_by_id(current_id) {
-                let mut max_similarity: f32 =
-                    self.compute_similarity(node_to_search.get_data(), query);
-                let mut max_idx: usize = 0;
-                let mut flag = 0;
-                for (idx, neighbor_id) in node_to_search.neighbors[0].iter().enumerate() {
-                    if let Some(neighbor_node) = self.get_node_by_id(*neighbor_id) {
-                        let temp_similarity =
-                            self.compute_similarity(neighbor_node.get_data(), query);
-                        if temp_similarity > max_similarity {
-                            max_similarity = temp_similarity;
-                            max_idx = idx;
-                            flag = 1;
-                        }
-                    }
-                    //max_similarity = temp_similarity.max(max_similarity);   //ご注意ください:这里max的用法用于比较两个f32
-                } //endfor: 得到了和query向量最近的一个已有节点在neighbors[0]中的下标max_idx
-                if flag == 0 {
-                    //利用node_to_search
-                    //没有任何邻居比当前节点更好.
-                    return Some(node_to_search.id);
-                } else {
-                    //利用neighbors[0][max_idx], 这个邻居比当前节点更好.
-                    let next_id = node_to_search.neighbors[0][max_idx]; //等号右边是一个id.
-                                                                        // let next_node_opt = self.get_node_by_id(next_id);
-                    current_id = next_id;
-                }
-            } else {
-                return None;
-            }
-        }
-    }
-
-    // v1:
-    // - 方法: 线性扫描 HashSet
-    // - 相似度来源: 通过 id_similarity_cache 复用/缓存 get_similarity 结果
-    // - 适用场景: 已经有“节点到当前 query 的相似度缓存”时，找集合中最近点
-    pub fn get_nearest_v1(&self, id_similarity_cache: &mut HashMap<Id, f32>, set: &HashSet<Id>, query: &Vector) -> Option<Id> {
-        //ご注意ください:如果函数签名中返回值仅仅写Id, 那么假如集合HashSet为空,就不会有合法的返回值.
-        //需要改成返回Option<Id>
-        //unimplemented!();
-        let mut max_similarity = -INFINITY;
-        let mut max_elem_id: Option<Id> = None;
-
-        for elem_id in set {
-
-            let temp_similarity = self.get_similarity(id_similarity_cache, elem_id, query);
-
-            if temp_similarity > max_similarity {
-                max_similarity = temp_similarity;
-                max_elem_id = Some(*elem_id);
-            } //endif
-        } //endfor
-        max_elem_id
-    }
-
-    // v1:
-    // - 方法: 线性扫描 HashSet
-    // - 相似度来源: 通过 id_similarity_cache 复用/缓存 get_similarity 结果
-    // - 适用场景: 已经有“节点到当前 query 的相似度缓存”时，找集合中最远点
-    pub fn get_furthest_v1(&self,  id_similarity_cache: &mut HashMap<Id, f32>, set: &HashSet<Id>, query: &Vector) -> Option<Id> {
-        let mut min_similarity = INFINITY;
-        let mut min_elem_id: Option<Id> = None;
-        //线性扫描的过程,非常耗时.
-        for elem_id in set {
-           let temp_similarity = self.get_similarity(id_similarity_cache, elem_id, query);
-            if temp_similarity < min_similarity {
-                min_similarity = temp_similarity;
-                min_elem_id = Some(*elem_id);
-            } //endif
-        } //endfor
-        min_elem_id
-    }
-
-    // v0:
-    // - 方法: 线性扫描 HashSet
-    // - 相似度来源: 不走 cache，直接 compute_similarity
-    // - 适用场景: 逻辑最直接的基线版本，便于理解和对照
-    pub fn get_nearest_v0(&self, set: &HashSet<Id>, query: &Vector) -> Option<Id> {
-        //ご注意ください:如果函数签名中返回值仅仅写Id, 那么假如集合HashSet为空,就不会有合法的返回值.
-        //需要改成返回Option<Id>
-        //unimplemented!();
-        let mut max_similarity = -INFINITY;
-        let mut max_elem_id: Option<Id> = None;
-
-        for elem_id in set {
-            let elem_node = self.get_node_by_id(*elem_id).expect("elem_node不存在");
-            let temp_similarity = self.compute_similarity(elem_node.get_data(), query);
-            if temp_similarity > max_similarity {
-                max_similarity = temp_similarity;
-                max_elem_id = Some(*elem_id);
-            } //endif
-        } //endfor
-        max_elem_id
-    }
-
-    // v0:
-    // - 方法: 线性扫描 HashSet
-    // - 相似度来源: 不走 cache，直接 compute_similarity
-    // - 适用场景: 逻辑最直接的基线版本，便于理解和对照
-    pub fn get_furthest_v0(&self, set: &HashSet<Id>, query: &Vector) -> Option<Id> {
-        let mut min_similarity = INFINITY;
-        let mut min_elem_id: Option<Id> = None;
-
-        for elem_id in set {
-            let elem_node = self.get_node_by_id(*elem_id).expect("elem_node不存在");
-            let temp_similarity = self.compute_similarity(elem_node.get_data(), query);
-            if temp_similarity < min_similarity {
-                min_similarity = temp_similarity;
-                min_elem_id = Some(*elem_id);
-            } //endif
-        } //endfor
-        min_elem_id
-    }
-
-    // 堆顶访问:
+    // 堆顶: 堆顶访问工具, 用于在搜索层里快速取“当前最优/最差”节点并跳过失效项。
     // - 方法: 基于 BinaryHeap 的堆顶访问，而不是线性扫描整个集合
     // - 数据来源: 依赖外部维护好的 heap + alive_set
     // - mode:
@@ -528,12 +409,13 @@ impl HnswIndex {
         }
     }
 
+    // 邻居: 读取某个节点在指定层的邻居集合, 供搜索与插边复用.
     pub fn get_neighbors_at_lvl(&self, id: Id, lvl: usize) -> HashSet<Id> {
         //ご注意ください:如果你用的是一个不带有&self的静态方法,方法不能访问self.nodes,不能访问索引内部的图结构,只能依靠传入的参数工作.
         //因此,必须访问self.
         //这样一来就可以用self.get_neighbors_at_lvl(id, lvl), 而不是更麻烦的HnswIndex::get_neighbors_at_lvl(&self, id, lvl)
         //unimplemented!()
-        //数据段职能理解错误:index_max_level仅指代整张图最高能有多少层.而单个节点拥有的层数可能小于最大层数.
+        // 避坑: index_max_level仅指代整张图最高能有多少层.而单个节点拥有的层数可能小于最大层数.
         //                 所以这里if条件不应该是if lvl > self.index_max_level
         let node_to_search = self.get_node_by_id(id).expect("get_node_by_id不存在");
 
@@ -553,7 +435,7 @@ impl HnswIndex {
         neighbors_set
     }
 
-    //输入一个cache数组<向量Id, 向量和query的相似度>, 如果目标向量的相似度值在cache中,直接返回,否则手动计算,更新cache
+    // 缓存: 输入一个cache数组<向量Id, 向量和query的相似度>, 如果目标向量的相似度值在cache中,直接返回,否则手动计算,更新cache
     pub fn get_similarity(&self, id_similarity_cache: &mut HashMap<Id, f32>, target_id: &Id, query: &Vector)->f32{
         if let Some(similarity) = id_similarity_cache.get(target_id){
             //cache命中
@@ -568,7 +450,7 @@ impl HnswIndex {
         }
     }
 
-    // 输出在level这一层, 距离查询向量query最近的一批向量, 总共ef个.
+    // 搜索: 输出在level这一层, 距离查询向量query最近的一批向量, 总共ef个.
     pub fn search_layer_v0(
         &self,
         query: &Vector,
@@ -581,12 +463,12 @@ impl HnswIndex {
 
         let mut stats = SearchLayerStats::default();
 
-        //已经访问过的节点集合v
+        // 避坑: 已经访问过的节点集合v
         let mut v_set: HashSet<Id> = HashSet::new();
-        //候选集合C (大地图)
+        // 避坑: 候选集合C (大地图)
         let mut c_set: HashSet<Id> = HashSet::new();
         let mut c_heap: BinaryHeap<(ordered_float::NotNan<f32>, Id)> = BinaryHeap::new();
-        //目前找到的最近点集合W
+        // 避坑: 目前找到的最近点集合W
         let mut w_set: HashSet<Id> = HashSet::new();
         let mut w_heap: BinaryHeap<(std::cmp::Reverse<ordered_float::NotNan<f32>>, Id)> = BinaryHeap::new();
 
@@ -603,7 +485,7 @@ impl HnswIndex {
 
         while !c_set.is_empty() {
             stats.loop_iterations += 1;
-            //ご注意ください:get方法是查看, 要完成"拿出来+删掉", 就需要一个額外的删除语句: .remove
+            // 避坑: get方法是查看, 要完成"拿出来+删掉", 就需要一个額外的删除语句: .remove
             let t = Instant::now();
             let c_id = self
                 .get_heap_extreme(&c_set, &mut c_heap, HeapAccessMode::PopAlive)
@@ -612,11 +494,11 @@ impl HnswIndex {
             let t = Instant::now();
             c_set.remove(&c_id);
             stats.candidate_bookkeeping_ns += t.elapsed().as_nanos();
-            //ご注意ください:get方法是查看, 要完成"拿出来读取", 而不是删掉.
+            // 避坑: get方法是查看, 要完成"拿出来读取", 而不是删掉.
             let t = Instant::now();
             let mut f_id = self.get_heap_extreme(&w_set, &mut w_heap, HeapAccessMode::PeekPruned).expect("f_id不存在");
             stats.furthest_scan_ns += t.elapsed().as_nanos();
-            // 逻辑:similarity的值: 两个向量距离越近, similarity的值越大.不要写反了.
+            // 避坑: similarity的值: 两个向量距离越近, similarity的值越大.不要写反了.
             let t = Instant::now();
             let c_similarity = self.get_similarity(id_similarity_cache, &c_id, query);
             let f_similarity = self.get_similarity(id_similarity_cache, &f_id, query);
@@ -629,7 +511,7 @@ impl HnswIndex {
             let t = Instant::now();
             let c_neighbors_set_at_lvl = self.get_neighbors_at_lvl(c_id, level);
             stats.neighbors_fetch_ns += t.elapsed().as_nanos();
-            // 语法:此处c_neighbors_set_at_lvl是Option<HashSet<u64>>.
+            // 避坑: 此处c_neighbors_set_at_lvl是Option<HashSet<u64>>.
             // 如果直接接上for e_id in c_neighbors_set_at_lvl开始迭代Option<HashSet<u64>>,
             // 那么最多循环1次(当Option的类型是Some),因为Option最多只有1个元素.
             // 两种修改方法,一是match语句,二是.expect("msg")
@@ -643,7 +525,7 @@ impl HnswIndex {
                 f_id = self.get_heap_extreme(&w_set, &mut w_heap, HeapAccessMode::PeekPruned).expect("f_id不存在");
                 stats.furthest_scan_ns += t.elapsed().as_nanos();
         
-                // 逻辑:similarity的值: 两个向量距离越近, similarity的值越大.不要写反了.
+                // 避坑: similarity的值: 两个向量距离越近, similarity的值越大.不要写反了.
                 let t = Instant::now();
                 let e_similarity = self.get_similarity(id_similarity_cache, &e_id, query);
                 let f_similarity = self.get_similarity(id_similarity_cache, &f_id, query);
@@ -673,6 +555,7 @@ impl HnswIndex {
         (w_set, stats)
     }
 
+    // 搜索: 在单层里做贪心下降, 给上层搜索提供更接近 query 的入口点.
     pub fn greedy_search_at_level(&self, query: &Vector, entry_id: Id, level: usize) -> Id {
         let mut id_similarity_cache: HashMap<Id, f32> = HashMap::new();
         
@@ -707,8 +590,7 @@ impl HnswIndex {
     }
 
 
-    //输入: ef_search是第0层的搜索宽度.
-    //返回: 按与 query 的相似度从高到低排序后的 top-k 节点 id
+    // 主线: 正式搜索入口, 先逐层贪心, 再在第0层取 top-k.
     pub fn search_knn_v1(&self, query: &Vector, k: usize, ef_search: usize) -> Vec<Id> {
         
         //不要直接用expect来panic, 而是结束程序, 返回一个空集合, 表示没有搜索到.
@@ -728,7 +610,7 @@ impl HnswIndex {
 
 
 
-        /******************************** 排序逻辑 *******************************************/
+        /******************************** 排序: 将候选集按相似度降序, 再按 id 稳定打平 *******************************************/
         
         candidate_sequence.sort_by(|id1, id2| {
             let score1 = self.get_similarity(&mut id_similarity_cache, id1, query);
@@ -756,41 +638,7 @@ impl HnswIndex {
     }
 
 
-    // 基于上面的search_knn_v1, 把搜索入口节点改成由参数传入.
-    pub fn search_knn_v1_from_entry_for_experiment(
-        &self,
-        entrance_id: Option<Id>,
-        query: &Vector,
-        k: usize,
-        ef_search: usize,) -> Vec<Id> {
-        let Some(mut current_entry_id) = entrance_id else {
-            return Vec::new();
-        };
-        let current_node = self.get_node_by_id(current_entry_id)
-            .expect("in search_knn_v1_from_entry_for_experiment, failed to get id with current_entry_id");
-        for lvl in (1..=*current_node.get_node_max_level()).rev() {
-            current_entry_id = self.greedy_search_at_level(query, current_entry_id, lvl);
-        }
-
-        let mut id_similarity_cache: HashMap<Id, f32> = HashMap::new();
-        let (candidate_set, _) = self.search_layer_v0(query, current_entry_id, 0, ef_search, &mut id_similarity_cache);
-
-        let mut candidate_sequence: Vec<Id> = candidate_set.into_iter().collect();
-        candidate_sequence.sort_by(|id1, id2| {
-            let score1 = self.get_similarity(&mut id_similarity_cache, id1, query);
-            let score2 = self.get_similarity(&mut id_similarity_cache, id2, query);
-            match score2.partial_cmp(&score1).unwrap() {
-                std::cmp::Ordering::Equal => id1.cmp(id2),
-                other => other,
-            }
-        });
-        if candidate_sequence.len() < k {
-            return candidate_sequence;
-        } else {
-            return candidate_sequence[..k].to_vec();
-        }
-    }
-    
+    // 采样: 采样新节点的层高, 让高层更稀少、低层更多.
     pub fn sample_level(&mut self) -> usize {
         //返回一个非负整数，表示新插入节点的最高层编号。
         //返回值应满足“高层更稀少、低层更多”的分布趋势.
@@ -805,7 +653,7 @@ impl HnswIndex {
         level
     }
 
-    // 插入新节点的核心逻辑, 先不考虑并发和持久化等问题, 只关注算法本身.
+    // 主线: 插入新节点的核心逻辑, 先不考虑并发和持久化等问题, 只关注算法本身.
     // 参数说明:
     // - id: 新节点的唯一标识符
     // - data: 新节点的向量数据
@@ -815,15 +663,15 @@ impl HnswIndex {
     pub fn insert_v1(&mut self, id: Id, data: Vector, ef_construction: usize, m: usize, m_max: usize) {
         self.timing.calls += 1;
         //************************* line 4 *******************************//
-        // Phase 1: Create new node.
-        // 为该节点采样层高
+        // 主线: Phase 1: Create new node.
+        // 采样: 为该节点采样层高
         let new_node_level = self.sample_level();
         // 创建节点
         let data_copy = data.clone();
         let new_node = HnswNode::new(id, data_copy, new_node_level);
         let mut id_similarity_cache: HashMap<Id, f32> = HashMap::new();
-        // Case 1: 
-        // 若图为空：
+        // 主线: Case 1:
+        // 初始化: 若图为空：
         if self.is_empty(){
             // 设置 entry_node_id
             self.entry_node_id = Some(id);
@@ -838,54 +686,53 @@ impl HnswIndex {
             return;
         }
 
-        // Case 2: 图非空。
+        // 主线: Case 2: 图非空。
 
-        // Phase 2: Top-down greedy routing.
+        // 主线: Phase 2: Top-down greedy routing.
         // - 从当前 entry_node_id 出发。
         // - 从 index_max_level 一路下降到 new_node_level + 1。
         // - 在这些层上调用 greedy_search_at_level(...)
         // - 得到一个更接近新节点向量的入口点。
 
         
-        // debug: 遗漏: 因为前面的代码实在太多, 导致遗漏了"新节点进图"的这个动作.
+        // 避坑: 因为前面的代码实在太多, 导致遗漏了"新节点进图"的这个动作.
         self.id_to_index.insert(id, self.nodes.len());
         self.nodes.push(new_node); // 所有权分析: push方法接收的是无引用的参数, 获得了所有权.
    
-        // IMPORTANT: 新节点在此时 push，虽然邻接表还未完全建立。
+        // 避坑: 新节点在此时 push，虽然邻接表还未完全建立。
         // 但由于新节点仅在 [0, new_node_level] 层出现，
         // 而 Phase 2 只在更高层运行，所以不会被意外访问。
         // Phase 3 中 search_layer_v0 虽然会看到新节点，但只用于"找邻居"而非搜索结果。
         // TODO: 可优化: 换一个方法, 不提前 push，改用临时邻居表 Phase 3 完成后，一次性完成插入.
 
-        // *************************************** line 5, line 6, line 7  *************************************************//
-        // 这是一个类似于坐电梯下楼的逻辑.在这一层楼上寻找离目的地最近的电梯,然后坐那个电梯下到下一层楼, 再在下一层楼上寻找离目的地最近的电梯, 以此类推, 直到坐到目的地所在的楼层为止.
+        // 主线: *************************************** line 5, line 6, line 7  *************************************************//
+        // 主线: 这是一个类似于坐电梯下楼的逻辑.在这一层楼上寻找离目的地最近的电梯,然后坐那个电梯下到下一层楼, 再在下一层楼上寻找离目的地最近的电梯, 以此类推, 直到坐到目的地所在的楼层为止.
         let mut entry_point_id = self.get_entry_node_id().expect("in insert_v1, entry_node_id is none");
 
-        // debug: 理解有误: greedy_search是在“新节点根本不存在的更高层”上完成的. 如果新节点的层数大于等于旧图最高层, 那么这个assert断言就会失败.
+        // 避坑: greedy_search是在“新节点根本不存在的更高层”上完成的. 如果新节点的层数大于等于旧图最高层, 那么这个assert断言就会失败.
         //                 正确的做法应该是使用条件逻辑, 分为 "新节点之上有更高层"和 "新节点之上没有更高层"两种情况处理.
         //        盲信伪代码: 伪代码 line 5 的原文是从 旧图最高层开始向下遍历到新节点所在层的上一层, 但是没考虑到"新节点之上没有更高层"这种情况.
         //assert!(self.index_max_level >= new_node_level + 1, "in insert_v1, expected self.index_max_level >= new_node_level + 1, got < ");
         
 
         if self.index_max_level >= new_node_level + 1{
-            // if这个条件不等式的成立保证了下面的for循环正常运行.
-            // debug: 混淆点位于伪代码(line 6, line 7)
-            // 伪代码line7中的ep已经不再是"整个Hnsw图的入口点", 而是一个"中间变量".
-            // 因为我们已经有"返回最近的唯一答案"greedy_search_at_level函数,所以line 6和line 7被一起执行.
-            // 伪代码中的ep, 实际上是下面这个for循环中的entry_point_id.
-            // 每一层, entry_point_id都会被greedy_search_at_level更新为"在当前层上, 离新节点更近的那个节点", 这个节点在下一层上作为新的入口点继续被greedy_search_at_level处理.
+            // 避坑: if这个条件不等式的成立保证了下面的for循环正常运行.
+            // 混淆: 伪代码line7中的ep已经不再是"整个Hnsw图的入口点", 而是一个"中间变量".
+            // 处理: 因为我们已经有"返回最近的唯一答案"greedy_search_at_level函数,所以line 6和line 7被一起执行.
+            // 处理: 伪代码中的ep, 实际上是下面这个for循环中的entry_point_id.
+            // 处理: 每一层, entry_point_id都会被greedy_search_at_level更新为"在当前层上, 离新节点更近的那个节点", 这个节点在下一层上作为新的入口点继续被greedy_search_at_level处理.
 
-            // debug: rust中, a..b要求a < b, a..=b要求a <= b. 而.rev()也不会允许a > b的情况.
-            // for current_level in (self.index_max_level .. new_node_level + 1).rev(){  // 不满足 a < b, 错误的写法.
+            // 避坑: rust中, a..b要求a < b, a..=b要求a <= b. 而.rev()也不会允许a > b的情况.
+            // 写法: for current_level in (self.index_max_level .. new_node_level + 1).rev(){  // 不满足 a < b, 错误的写法.
             let t = Instant::now();
             for current_level in (new_node_level + 1 ..= self.index_max_level).rev(){ //满足 a < b. 不加=号是左闭右开, 加=号是全闭区间. 这里需要加=号, 因为current_level需要从index_max_level一直遍历到new_node_level+1, 包含两端.
-                // 所有权分析: 由于new_node在前面的"新节点进图"中, 所有权已经转移, 被消费掉了, 所以在这里调用new_node.get_data()就是非法的.
-                //            解决方案就是在push之前, 就把get_data()的结果保存下来, 供这里调用.
-                //            但是由于get_data()返回的是data: Vector,也就是insert_v1的参数data,所以这里可以直接用&data代替.
+                // 所有权: 由于new_node在前面的"新节点进图"中, 所有权已经转移, 被消费掉了, 所以在这里调用new_node.get_data()就是非法的.
+                // 解决: 解决方案就是在push之前, 就把get_data()的结果保存下来, 供这里调用.
+                // 说明: 但是由于get_data()返回的是data: Vector,也就是insert_v1的参数data,所以这里可以直接用&data代替.
                 entry_point_id = self.greedy_search_at_level(&data,entry_point_id, current_level);
 
 
-                // 以下是严格按照伪代码来写的另一种思路, 先调用search_layer_v0得到一个集合, 再从集合中选出一个最近的节点作为下一层的入口点.
+                // 备选: 以下是严格按照伪代码来写的另一种思路, 先调用search_layer_v0得到一个集合, 再从集合中选出一个最近的节点作为下一层的入口点.
                 // 但是由于我们已经有了greedy_search_at_level这个函数, 直接调用它就可以了, 不需要再调用search_layer_v0了.
                 // 可以看到在这里ef被设置成了1, 也就是只搜索一个最近的节点(粗搜)
                 // 不同于后面在新节点所在层上搜索时的ef大于1, 以便得到一个更大的候选集合.(精搜)
@@ -897,22 +744,22 @@ impl HnswIndex {
         }
 
         
-        /**************************************** line 8  **************************************************/
-        /********************************** 在会出现新节点的层上建边 ****************************************/
+        /**************************************** 主线: line 8  **************************************************/
+        /********************************** 主线: 在会出现新节点的层上建边 ****************************************/
 
 
-        // Phase 3: Layer-by-layer neighbor search. 
+        // 主线: Phase 3: Layer-by-layer neighbor search.
         
-        // - 对每一层 level = min(index_max_level, new_node_level), ..., 0。
+        // 主线: - 对每一层 level = min(index_max_level, new_node_level), ..., 0。
         let min_level = std::cmp::min(self.index_max_level, new_node_level);
         
-        // debug: 对for循环范围声明不清楚. current_lvl需要从min_level开始一直反向遍历到0, 并且包含min_level和0.
-        // for current_lvl in (0 .. min_level).rev(){    //这样的写法是从min_level_-1开始遍历到0
+        // 避坑: 对for循环范围声明不清楚. current_lvl需要从min_level开始一直反向遍历到0, 并且包含min_level和0.
+        // 写法: for current_lvl in (0 .. min_level).rev(){    //这样的写法是从min_level_-1开始遍历到0
         for current_lvl in (0..=min_level).rev(){ //这样的写法是从min_level开始遍历到0
             
-            /**************************************** line 9 获得候选集合 W_set **************************************************/
-            // 在会出现新节点的层上, 需要扩大搜索范围, ef不再只是1.
-            // 不同于前面在更高层上搜索时的粗搜, 这里需要在新节点所在层上进行精搜, 以便得到一个更大的候选集合.因此ef的值应该大于1.
+            /**************************************** 主线: line 9 获得候选集合 W_set **************************************************/
+            // 主线: 在会出现新节点的层上, 需要扩大搜索范围, ef不再只是1.
+            // 主线: 不同于前面在更高层上搜索时的粗搜, 这里需要在新节点所在层上进行精搜, 以便得到一个更大的候选集合.因此ef的值应该大于1.
             let t = Instant::now();
             let (w_set, sl_stats) = self.search_layer_v0(&data, entry_point_id, current_lvl, ef_construction,&mut id_similarity_cache);
             self.timing.search_layer_ns += t.elapsed().as_nanos();
@@ -923,30 +770,30 @@ impl HnswIndex {
             self.timing.search_layer_bookkeeping_ns += sl_stats.candidate_bookkeeping_ns;
             self.timing.search_layer_loop_iterations += sl_stats.loop_iterations;
 
-            /**************************************** line 10 从候选中选出最多 M 个邻居 **************************************************/
-            // TODO: 可优化: 引入启发式
+            /**************************************** 主线: line 10 从候选中选出最多 M 个邻居 **************************************************/
+            // 优化: 可引入启发式
             // simple方法按距离排序, 选出前M个. 但是如果候选集合中有很多距离相近的节点, 可能会导致选出的邻居过于集中, 从而影响搜索效率.
             // 因此需要引入一些多样性启发式，避免所有边都指向一团特别近但很拥挤的点.
             let t = Instant::now();
             let neighbors_set = &self.select_neighbors_simple(&w_set,&data,m, &mut id_similarity_cache);
             self.timing.select_neighbors_ns += t.elapsed().as_nanos();
 
-            /**************************************** line 11 将这些邻居与新节点双向连边 **************************************************/
-            // 双向连边保证图的互相可达性.
+            /**************************************** 主线: line 11 将这些邻居与新节点双向连边 **************************************************/
+            // 主线: 双向连边保证图的互相可达性.
             let t = Instant::now();
             for neighbor_node_id in neighbors_set{
-                // debug: 遗漏导致的后果: 如果new_node没有及时进图的话,在图中通过id来查找node的动作就会失败,整个for循环都无法正常执行.
+                // 避坑: 遗漏导致的后果: 如果new_node没有及时进图的话,在图中通过id来查找node的动作就会失败,整个for循环都无法正常执行.
                 self.add_neighbor_to_node_at_level(id, *neighbor_node_id, current_lvl);
                 self.add_neighbor_to_node_at_level(*neighbor_node_id, id, current_lvl);
             }
             self.timing.link_ns += t.elapsed().as_nanos();
 
-            /************************************** 下面的line 12-16处理的都是剪枝逻辑,为方便理解可整块跳过 **************************************************/
-            /**************************************** line 12 对刚刚连上的每个老邻居 e 逐个检查 **************************************************/
-            // 对于每一个被选为邻居的节点e, 如果它的邻居数超过了m_max, 就需要进行邻居选择和替换.
-            // 这一步是为了控制图的稀疏度, 避免某些节点的邻居过多导致搜索效率下降.
+            /************************************** 剪枝: 下面的line 12-16处理的都是剪枝逻辑,为方便理解可整块跳过 **************************************************/
+            /**************************************** 剪枝: line 12 对刚刚连上的每个老邻居 e 逐个检查 **************************************************/
+            // 剪枝: 对于每一个被选为邻居的节点e, 如果它的邻居数超过了m_max, 就需要进行邻居选择和替换.
+            // 剪枝: 这一步是为了控制图的稀疏度, 避免某些节点的邻居过多导致搜索效率下降.
 
-            // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+            // 避坑: !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
             // 这个for内部的引用体系堪称灾难, 字面意义上的堪称灾难.
 
             let t = Instant::now();
@@ -957,7 +804,7 @@ impl HnswIndex {
                 // let e_conn = &e_node.get_neighbors()[current_lvl];
                 // let e_conn_set: HashSet<u64> = e_conn.iter().take(m).copied().collect();
 
-                /**************************************** line 13 取出 e 在这一层的所有邻居集合 eConn **************************************************/
+                /**************************************** 剪枝: line 13 取出 e 在这一层的所有邻居集合 eConn **************************************************/
                 let e_conn_set: HashSet<u64> = {
                     let e_node = self.get_node_by_id(*e_id)
                         .expect("in insert_v1, get_node_by_id cannot handle e_id");
@@ -968,18 +815,18 @@ impl HnswIndex {
                         .collect()
                 };
                 
-                /**************************************** line 14  **************************************************/          
-                /*********** 在第current_level 这一层上, 如果点 e 的邻居数目超过Mmax (一个点在一层上最多可拥有的邻居数)，那就得删一些边 */
+                /**************************************** 剪枝: line 14  **************************************************/          
+                /*********** 剪枝: 在第current_level 这一层上, 如果点 e 的邻居数目超过Mmax (一个点在一层上最多可拥有的邻居数)，那就得删一些边 */
                 if e_conn_set.len() > m_max {
                     // let e_new_conn_set = &self.select_neighbors_simple(&e_conn_set,e_node.get_data(), m_max);
-                    // 改进: 这里返回的是一个有序Vec
+                    // 优化: 这里返回的是一个有序Vec
                     
-                    /***************************** line 15 重新从 e 当前所有邻居里，筛出一个更好的、大小不超过 Mmax 的集合 e_new_conn **************************************************/
+                    /***************************** 剪枝: line 15 重新从 e 当前所有邻居里，筛出一个更好的、大小不超过 Mmax 的集合 e_new_conn **************************************************/
                 
                     let e_new_conn_vec: Vec<u64> = {
                         let e_node = self.get_node_by_id(*e_id)
                             .expect("in insert_v1, get_node_by_id cannot handle e_id");
-                        // [加菲注] 这里必须新建 e_cache, 不能复用外层的 id_similarity_cache.
+                        // 缓存: 这里必须新建 e_cache, 不能复用外层的 id_similarity_cache.
                         // 原因: id_similarity_cache 里存的是 similarity(某节点, &data),
                         //       也就是"某节点 和 新插入节点" 之间的相似度.
                         // 但是 select_neighbors_simple 在这里的 query 是 e_node.get_data(),
@@ -990,18 +837,18 @@ impl HnswIndex {
                         let mut e_cache: HashMap<Id, f32> = HashMap::new();
                         self.select_neighbors_simple(&e_conn_set, e_node.get_data(), m_max, &mut e_cache)
                     };
-                    //此处对应 line 16, 但目前不是很会写.
+                    // 剪枝: 此处对应 line 16, 但目前不是很会写.
 
                     let e_node = self.get_mut_node_by_id(*e_id)
                         .expect("in insert_v1, get_node_by_id cannot handle e_id");
                     
-                    /***************************** line 16 更新 e 的邻居表 **************************************************/
+                    /***************************** 剪枝: line 16 更新 e 的邻居表 **************************************************/
                 
-                    //e_node.neighbors[current_lvl] = e_new_conn_set.iter().copied().collect();
-                    // 改进: 利用vec直接赋值
+                    // 优化: e_node.neighbors[current_lvl] = e_new_conn_set.iter().copied().collect();
+                    // 优化: 利用vec直接赋值
                     // e_node.neighbors[current_lvl] = e_new_conn_vec;
 
-                    // e_new_conn_vec 是新的邻居列表
+                    // 剪枝: e_new_conn_vec 是新的邻居列表
                     // e_node.neighbors[current_lvl] 是旧的邻居列表
                     // 我们过去的做法是直接用新的覆盖旧的, 但是这样会导致单方面的修改.
                     // 那么如果要改成利用函数pub fn delete_neighbor_relationship(&mut self, node1_id: Id, node2_id:Id){进行双向删除, 要怎么做?
@@ -1012,7 +859,7 @@ impl HnswIndex {
                     let new_set: HashSet<Id> = e_new_conn_vec.iter().cloned().collect();
                     // 计算差集
                     let to_delete: HashSet<Id> = old_set.difference(&new_set).cloned().collect();
-                    // 不清楚这里.cloned().collect();的用法f目标是什么
+                    // 避坑: 不清楚这里.cloned().collect();的用法f目标是什么
 
                     // 更新e_node的邻居表.
                     e_node.neighbors[current_lvl] = e_new_conn_vec;
@@ -1024,126 +871,35 @@ impl HnswIndex {
                 }
             }//endfor
             self.timing.pruning_ns += t.elapsed().as_nanos();
-            /**************************************** 上面的line 12-16处理的都是剪枝逻辑,为方便理解可整块跳过 **************************************************/
+            /**************************************** 剪枝: 上面的line 12-16处理的都是剪枝逻辑,为方便理解可整块跳过 **************************************************/
 
 
 
-            /**************************************** line 17 为下一层更新入口点 **************************************************/
+            /**************************************** 主线: line 17 为下一层更新入口点 **************************************************/
 
-            // debug: 理解有误.line 17的ep是一个局部变量, 不再代表"整个hnsw图的入口点"
+            // 避坑: 理解有误.line 17的ep是一个局部变量, 不再代表"整个hnsw图的入口点"
             // self.entry_node_id = w_set.iter().next().copied();
 
-            // 调用get_nearest函数来从w_set中选出一个最近的节点作为下一层的入口点.
+            // 主线: 调用get_nearest函数来从w_set中选出一个最近的节点作为下一层的入口点.
             entry_point_id = self.get_nearest_v1(&mut id_similarity_cache, &w_set, &data).expect("searchh_result_id赋值错误");
         }
 
 
 
-        // Phase 4: Update entry point if needed.
-        /**************************************** line 18  **************************************************/
-        /************************* 如果新点 q 可以到达的最高层 l 比当前图最高层 L 还高  */
+        // 主线: Phase 4: Update entry point if needed.
+        /**************************************** 主线: line 18  **************************************************/
+        /************************* 主线: 如果新点 q 可以到达的最高层 l 比当前图最高层 L 还高  */
                 
         if new_node_level > self.index_max_level{
 
-            /*************************  line 19 那就把 q 升级为新的入口点，并把图的最高层更新为 l  **************************************************/
+            /************************* 主线: line 19 那就把 q 升级为新的入口点，并把图的最高层更新为 l  **************************************************/
             self.entry_node_id = Some(id);
             self.index_max_level = new_node_level;
         }
     }
 
-    // 基于insert_v1实现的测试专用函数, 人为指定这一点位于哪一层, 不使用随机采样层高的逻辑.
-    // 插入新节点的核心逻辑, 先不考虑并发和持久化等问题, 只关注算法本身.
-    // 参数说明:
-    // - id: 新节点的唯一标识符
-    // - data: 新节点的向量数据
-    // - ef_construction: 在构建过程中搜索层时使用的参数，控制搜索的宽度
-    // - m: 每层连接的最大邻居数. 在插入新节点时, 每层最多连接m个邻居.
-    // - m_max: 每层允许的最大邻居数. 在插入新节点时, 如果某个节点的邻居数超过m_max, 就需要进行邻居选择和替换.
-    // - level: 人为故意指定这一点位于哪一层.
-    pub fn insert_v1_fixed_level(&mut self, id: Id, data: Vector, ef_construction: usize, m: usize, m_max: usize, level: &usize) {
-        let new_node_level = *level;
-        let data_copy = data.clone();
-        let new_node = HnswNode::new(id, data_copy, new_node_level);
-        let mut id_similarity_cache: HashMap<Id, f32> = HashMap::new();
-        if self.is_empty() {
-            self.entry_node_id = Some(id);
-            self.index_max_level = new_node_level;
-            self.id_to_index.insert(id, self.nodes.len());
-            self.nodes.push(new_node);
-            return;
-        }
-        self.id_to_index.insert(id, self.nodes.len());
-        self.nodes.push(new_node);
-        let mut entry_point_id = self.get_entry_node_id().expect("in insert_v1, entry_node_id is none");
-        if self.index_max_level >= new_node_level + 1 {
-            for current_level in (new_node_level + 1..=self.index_max_level).rev() {
-                entry_point_id = self.greedy_search_at_level(&data, entry_point_id, current_level);
-            }
-        }
-        let min_level = std::cmp::min(self.index_max_level, new_node_level);
-        for current_lvl in (0..=min_level).rev() {
-            let t = Instant::now();
-            let (w_set, sl_stats) = self.search_layer_v0(&data, entry_point_id, current_lvl, ef_construction, &mut id_similarity_cache);
-            self.timing.search_layer_ns += t.elapsed().as_nanos();
-            self.timing.search_layer_compute_sim_ns += sl_stats.compute_sim_ns;
-            self.timing.search_layer_furthest_scan_ns += sl_stats.furthest_scan_ns;
-            self.timing.search_layer_neighbors_fetch_ns += sl_stats.neighbors_fetch_ns;
-            self.timing.search_layer_heap_pop_ns += sl_stats.heap_pop_ns;
-            self.timing.search_layer_bookkeeping_ns += sl_stats.candidate_bookkeeping_ns;
-            self.timing.search_layer_loop_iterations += sl_stats.loop_iterations;
-            let neighbors_set = &self.select_neighbors_simple(&w_set, &data, m, &mut id_similarity_cache);
-            for neighbor_node_id in neighbors_set {
-                self.add_neighbor_to_node_at_level(id, *neighbor_node_id, current_lvl);
-                self.add_neighbor_to_node_at_level(*neighbor_node_id, id, current_lvl);
-            }
-            for e_id in neighbors_set{
-                let e_conn_set: HashSet<u64> = {
-                    let e_node = self.get_node_by_id(*e_id)
-                        .expect("in insert_v1, get_node_by_id cannot handle e_id");
-                    e_node.get_neighbors()[current_lvl]
-                        .iter()
-                        .copied()
-                        .collect()
-                };
-                if e_conn_set.len() > m_max {
-                    let e_new_conn_vec: Vec<u64> = {
-                        let e_node = self.get_node_by_id(*e_id)
-                            .expect("in insert_v1, get_node_by_id cannot handle e_id");
-                        // [加菲注] 这里必须新建 e_cache, 不能复用外层的 id_similarity_cache.
-                        // 原因: id_similarity_cache 里存的是 similarity(某节点, &data),
-                        //       也就是"某节点 和 新插入节点" 之间的相似度.
-                        // 但是 select_neighbors_simple 在这里的 query 是 e_node.get_data(),
-                        //       也就是"某节点 和 老节点e" 之间的相似度, 是完全不同的一张表.
-                        // 如果直接传 id_similarity_cache, get_similarity 会在里面查到 "和新节点的相似度"
-                        //       当成 "和e的相似度" 直接用, 导致剪枝结果完全错误.
-                        // 因此每个 e_id 的剪枝都需要一个以 e_node 为 query 基准的独立空 cache.
-                        let mut e_cache: HashMap<Id, f32> = HashMap::new();
-                        self.select_neighbors_simple(&e_conn_set, e_node.get_data(), m_max, &mut e_cache)
-                    };
-                    let e_node = self.get_mut_node_by_id(*e_id)
-                        .expect("in insert_v1, get_node_by_id cannot handle e_id");
-                    let old_neighbors = e_node.neighbors[current_lvl].clone();
-                    let old_set: HashSet<Id> = old_neighbors.iter().cloned().collect();
-                    let new_set: HashSet<Id> = e_new_conn_vec.iter().cloned().collect();
-                    let to_delete: HashSet<Id> = old_set.difference(&new_set).cloned().collect();
-                    e_node.neighbors[current_lvl] = e_new_conn_vec;
-                    for neighbor_to_delete_id in to_delete{
-                        self.delete_neighbor_relationship_at_level(*e_id, neighbor_to_delete_id, current_lvl);
-                    }
-                }
-            }//endfor
-            entry_point_id = self.get_nearest_v1(&mut id_similarity_cache, &w_set, &data).expect("searchh_result_id赋值错误");
-        }
-        if new_node_level > self.index_max_level {
-            self.entry_node_id = Some(id);
-            self.index_max_level = new_node_level;
-        }
-    }
-
-
-
-    // 实现一个简化版本的邻居选择函数
-    // cadidates: 候选集合, m:返回的邻居数目,如果不足m个,就全部返回.
+    // 优化: 实现一个简化版本的邻居选择函数, 从候选集合中取前 m 个.
+    // 优化: cadidates: 候选集合, m:返回的邻居数目,如果不足m个,就全部返回.
     pub fn select_neighbors_simple(&self, candidate_set: &HashSet<Id>, query: &Vector, m: usize, cache: &mut HashMap<Id, f32>) -> Vec<Id>{
         let mut id_score_map: Vec<(u64, f32)>= candidate_set
             .iter()

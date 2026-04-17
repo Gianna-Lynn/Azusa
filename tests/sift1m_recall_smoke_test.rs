@@ -105,7 +105,7 @@ fn run_hnsw_in_sift1m_case(
         .expect("in function run_hnsw_in_sift1m_case, load base_bytes error");
     let base_vecs = read_fvecs(&base_bytes,base_limit);
     let build_start = Instant::now();
-    let index =  build_index(&base_vecs, DEFAULT_HNSW_BUILD_PARAMS);
+    let index = build_index(&base_vecs, DEFAULT_HNSW_BUILD_PARAMS);
     println!("base_limit={} build_index took: {:?}", base_limit, build_start.elapsed());
     index.print_timings();
 
@@ -113,22 +113,39 @@ fn run_hnsw_in_sift1m_case(
         .expect("in function run_hnsw_in_sift1m_case, load query_bytes error");
     let query_vecs = read_fvecs(&query_bytes,query_limit);
 
+    // 狸花: 优化性能.
+    // 原本的暴力搜索真值 (exact_top_k) 是在 ef_search 的循环内部计算的,
+    // 这会导致对于每一个 ef_search 参数, 都会重复进行一次耗时极高的暴力计算.
+    // 现将其提取到循环外部, 提前计算好所有 query 的 groundtruth, 供后续循环复用.
+    let mut all_brute_force_ids = Vec::with_capacity(query_limit);
+    println!("Pre-calculating brute-force ground truth for {} queries...", query_limit);
+    let brute_force_start = Instant::now();
+    for query_vec in query_vecs.iter() {
+        let brute_force = exact_top_k(&base_vecs, query_vec, k, TEST_METRIC);
+        let brute_force_ids: Vec<_> = brute_force.iter().map(|(id, _)| *id).collect();
+        all_brute_force_ids.push(brute_force_ids);
+    }
+    println!("Ground truth calculation took: {:?}", brute_force_start.elapsed());
+
     for ef_search_num in ef_search{
         let mut cnt = 0;
         let mut total_recall_at_k:f32 = 0.0;
         let mut total_exact_at_k = 0;
         println!("--- base_limit={}, ef_search={} ---", base_limit, ef_search_num);
-        for query_vec in query_vecs.iter(){
+        for (idx, query_vec) in query_vecs.iter().enumerate() { // 狸花: 改为 enumerate() 以便获取索引
             
             cnt = cnt + 1;
 
-            let query = query_vec.clone();
-
-            let brute_force = exact_top_k(&base_vecs, &query, k, TEST_METRIC);
+            // 狸花: 优化性能. 移除不必要的 clone. query_vec 已经是我们需要的引用.
+            // let query = query_vec.clone();
+            // 狸花: 优化性能. 不再重复计算暴力搜索, 而是直接从预计算的结果中获取.
+            // let brute_force = exact_top_k(&base_vecs, &query, k, TEST_METRIC);
             let search_start = Instant::now();
-            let search_result_ids = index.search_knn_v1(&query, k, *ef_search_num);
+            // 狸花: 优化性能. 直接传递 &Vec<f32> (query_vec), search_knn_v1 会自动解引用为 &[f32].
+            let search_result_ids = index.search_knn_v1(query_vec, k, *ef_search_num);
             println!("  query[{}/{}] ef_search={} search_knn_v1 took: {:?}", cnt, query_limit, ef_search_num, search_start.elapsed());
-            let brute_force_ids: Vec<_> = brute_force.iter().map(|(id,_)|   *id).collect();
+            // 狸花: 优化性能. 直接从预计算的 all_brute_force_ids 中通过索引获取真值.
+            let brute_force_ids = &all_brute_force_ids[idx];
 
             let brute_set: HashSet<_> = brute_force_ids.iter().copied().collect();
             let overlap: Vec<_> = search_result_ids
@@ -194,13 +211,17 @@ fn run_sift1m_recall_case(
     // println!("query_vecs.len() is {}", query_vecs.len());  //==limit
     // println!("query_vecs[0].len() is {}", query_vecs[0].len()); //==128
 
-    let query = query_vecs[0].clone();
-    let top_k =  exact_top_k(&base_vecs, &query, k, TEST_METRIC);
+    // let query = query_vecs[0].clone();
+    // 狸花: 优化性能. 移除不必要的 clone, 直接使用引用.
+    let query = &query_vecs[0];
+    let top_k =  exact_top_k(&base_vecs, query, k, TEST_METRIC);
     let build_start = Instant::now();
     let index = build_index(&base_vecs, DEFAULT_HNSW_BUILD_PARAMS);
     println!("build_index took: {:?}", build_start.elapsed());
     let search_start = Instant::now();
-    let search_result = index.search_knn_v1(&query, k, ef_search);
+    // 狸花: 优化性能.
+    // search_knn_v1 的参数是 &[f32], query 是 &Vec<f32>, Rust 会自动解引用.
+    let search_result = index.search_knn_v1(query, k, ef_search);
     println!("search_knn_v1 took: {:?}", search_start.elapsed());
 
     //打印向量本体
@@ -213,24 +234,40 @@ fn run_sift1m_recall_case(
 }
 
 
-pub fn exact_top_k(base_vecs: &Vec<Vec<f32>>, query: &Vec<f32>, k: usize, metric: Metric)->Vec<(u64, f32)>{
-    let mut results = Vec::new();
-    for(idx, base_vec) in base_vecs.iter().enumerate(){
-        let score = similarity(&query, &base_vec , metric);
-        results.push((idx as u64, score)); //(idx, score)
+// 大橘: 优化函数签名与代码规范.
+// 将函数参数从 &Vec<T> 改为更通用的切片 &[T], 增强函数适用性.
+pub fn exact_top_k(base_vecs: &[Vec<f32>], query: &[f32], k: usize, metric: Metric) -> Vec<(u64, f32)> {
+    let mut results = Vec::with_capacity(base_vecs.len());
+    for (idx, base_vec) in base_vecs.iter().enumerate() {
+        // 大橘: 优化代码规范.
+        // similarity 函数的参数是 &[f32], query 和 base_vec 可以直接传入, Rust 会自动解引用.
+        // 原: let score = similarity(&query, &base_vec , metric);
+        let score = similarity(query, base_vec, metric);
+        results.push((idx as u64, score));
     }
-    results.sort_by(|a,b| b.1.partial_cmp(&a.1).unwrap());
-    let top_k = results.iter().take(k).copied().collect::<Vec<_>>();
-    //.iter()把results变成一个 "一个个看元素"的迭代器, .take(k)只取前k个, 
-    //.collect::<Vec<_>>()把前面取得的这些元素重新收集成一个Vec,具体的元素让Rust自己推断.
 
-    // .iter().take(k) 产生的是 Iterator<&(u64, f32)>（引用），
-    // .copied() 会把引用转成实际的值，然后才能正确推断为 Vec<(u64, f32)>。
-    // (u64, f32) 是 Copy 类型（两个字段都是 Copy）.
-    //               Copy 是 Rust 的一个特征（trait），表示这个类型可以通过简单的按位复制来完整复制，无需特殊处理。静态的数据类型基本都是Copy
-    // 对于 Copy 类型，.copied() 明确表达"复制这个 Copy 值"，更高效且符合语义
-    // .clone() 虽然也能用，但对 Copy 类型来说是多余的
-    top_k
+    // 大橘: 优化性能.
+    // 原本是对所有结果进行 O(N log N) 的全排序, 然后取前 k 个.
+    // 当 base_vecs 很大时 (例如 SIFT1M 的 100 万), 这个开销非常大.
+    // 现改为使用 `select_nth_unstable_by`, 这是一个 O(N) 的部分排序算法,
+    // 它能保证第 k 个元素就位, 并且所有前 k 个元素都在它前面.
+    // 之后再对这 k 个元素进行一次 O(k log k) 的排序, 总体性能大幅提升.
+    if results.len() > k {
+        // O(N) 操作: 将第 k 个位置的元素就位.
+        // 排序规则: score 降序, score 相同则 id 升序, 保持结果可复现。
+        results.select_nth_unstable_by(k, |a, b| match b.1.partial_cmp(&a.1).unwrap() {
+            std::cmp::Ordering::Equal => a.0.cmp(&b.0),
+            other => other,
+        });
+        // 截断, 只保留前面未经排序的 k 个元素.
+        results.truncate(k);
+    }
+    // O(k log k) 操作: 对最终的 top-k 结果进行精确排序.
+    results.sort_by(|a, b| match b.1.partial_cmp(&a.1).unwrap() {
+        std::cmp::Ordering::Equal => a.0.cmp(&b.0),
+        other => other,
+    });
+    results
 }
 
 fn build_index(base_vecs: &[Vec<f32>], params: HnswBuildParams) -> HnswIndex {

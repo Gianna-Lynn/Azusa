@@ -1,10 +1,10 @@
 [package]
-name = "toy_vector_db"
+name = "azusa"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "toy_vector_db"
+name = "azusa"
 path = "src/lib.rs"
 
 [dependencies]

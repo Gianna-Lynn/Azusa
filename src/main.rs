@@ -1,11 +1,11 @@
-use toy_vector_db::{
+use azusa::{
     search,
     storage::{inmemory::InMemoryVectorStore, VectorStore},
 };
 
 fn main() {
     println!("========================================");
-    println!("    Toy Vector DB -v0.1  (booting up)   ");
+    println!("           Azusa -v0.1  (booting up)    ");
     println!("========================================");
 
     let mut store = InMemoryVectorStore::new();

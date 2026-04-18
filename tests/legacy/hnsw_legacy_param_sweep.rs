@@ -8,7 +8,7 @@ mod legacy_handcrafted_cases;
 use legacy_experiment_common::{build_index, ideal_answer_generator};
 use legacy_handcrafted_cases::*;
 
-use toy_vector_db::types::Id;
+use azusa::types::Id;
 
 // // 参数说明:
 // // - id: 新节点的唯一标识符

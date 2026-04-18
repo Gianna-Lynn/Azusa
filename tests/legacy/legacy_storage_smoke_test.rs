@@ -7,9 +7,9 @@
 //     assert_eq!(2 + 2, 4);
 // }
 
-use toy_vector_db::search::flat::search_flat;
-use toy_vector_db::storage::inmemory::InMemoryVectorStore;
-use toy_vector_db::storage::VectorStore;
+use azusa::search::flat::search_flat;
+use azusa::storage::inmemory::InMemoryVectorStore;
+use azusa::storage::VectorStore;
 
 const LEGACY_STORAGE_FIXTURE_PATH: &str = "tests/legacy/fixtures/test_vectors.json";
 

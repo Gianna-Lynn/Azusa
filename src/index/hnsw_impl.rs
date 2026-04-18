@@ -136,15 +136,9 @@ impl HnswIndex {
         self.delete_neighbor_relationship(node1_id, node2_id, Some(level));
     }
 
-    pub fn get_neighbors_at_lvl(&self, id: Id, lvl: usize) -> HashSet<Id> {
+    pub fn get_neighbors_at_lvl(&self, id: Id, lvl: usize) -> &[Id] {
         let node_to_search = self.get_node_by_id(id).expect("get_node_by_id不存在");
-        if lvl >= node_to_search.get_neighbors().len() {
-            return HashSet::new();
-        }
-        node_to_search.get_neighbors()[lvl]
-            .iter()
-            .cloned()
-            .collect()
+        &node_to_search.get_neighbors()[lvl]
     }
 }
 
@@ -237,10 +231,30 @@ impl HnswIndex {
         ef: usize,
         id_similarity_cache: &mut HashMap<Id, f32>,
     ) -> (HashSet<Id>, SearchLayerStats) {
+
+        // 旧的思路:
+        // “堆负责快速找到极值，set 负责维护这个元素是否仍然属于当前有效集合；
+        // 因为堆不擅长删除中间元素，所以采用 lazy deletion，
+        // 等元素冒到堆顶时再用 set 判断它是不是已经失效。”
+
         assert!(ef >= 1, "ef至少为1");
         let mut stats = SearchLayerStats::default();
+        
         // 已访问过的点，避免重复扩展。
-        let mut visited_set: HashSet<Id> = HashSet::new();
+        // let mut visited_set: HashSet<Id> = HashSet::new();
+        // 改进: set换成布尔数组
+        // 已访问过的点, 使用布尔数组实现.替代旧版本的visited_set, hashset实现.
+        let mut visited_bool: Vec<bool> = vec![false; self.nodes.len()]; //初始化足够长,避免后续的随机访问下标越界
+        // visited_bool的下标不能直接使用id, 那样会让规模直接爆炸. 
+        // 需要建立一个映射, 让向量的id被映射到visited_bool里面的索引idx.
+        // 目前HnswIndex中已经自带一个id_to_index: HashMap<Id, usize>, 或许不需要我们在这里手动新建.
+        // 其实还是需要手动新建的. 观察代码可以知道, 原来的id_to_index插入的键值对是(id, self.nodes.len())
+        // 让向量的id被映射到HnswIndex的nodes数组中的下标, 这两个东西根本不能混用.
+        // let mut id_to_visited_idx :HashMap<Id, usize> = HashMap::new();
+        // 尝试复用self.id_to_index: visited_bool中的下标不再是从0开始严格递增的排布, 而是复用节点在nodes里的位置.
+        //                      那么这样visited_bool就不能是一维的,不能依据append在最后追加, 必须改成<节点在nodes里的位置, bool>
+        //                      实际上这么想就又错了, visited_bool 正因为是一维的，必须让下标语义变成节点位置, 而不是把节点位置写进值里
+
         // 候选点池，负责“下一步先扩展谁”。
         let mut candidate_set: HashSet<Id> = HashSet::new();
         let mut candidate_heap: BinaryHeap<(ordered_float::NotNan<f32>, Id)> = BinaryHeap::new();
@@ -250,7 +264,10 @@ impl HnswIndex {
             BinaryHeap::new();
 
         // 入口点先进入三套状态。
-        visited_set.insert(entry_id);
+        // visited_set.insert(entry_id);
+        // 改进: set换成布尔数组
+        visited_bool[self.id_to_index[&entry_id]] = true; // visited[映射后的新元素索引] = true
+
         candidate_set.insert(entry_id);
         let entry_similarity = self.get_similarity(id_similarity_cache, &entry_id, query);
         candidate_heap.push((
@@ -290,11 +307,20 @@ impl HnswIndex {
             // 展开当前候选点的邻居。
             let current_candidate_neighbors =
                 self.get_neighbors_at_lvl(current_candidate_id, level);
-            for neighbor_id in current_candidate_neighbors {
-                if visited_set.contains(&neighbor_id) {
+            for &neighbor_id in current_candidate_neighbors {
+                
+                // if visited_set.contains(&neighbor_id) {
+                //     continue;
+                // }
+                // 改进: 使用布尔数组
+                let idx = self.id_to_index[&neighbor_id];
+                if visited_bool[idx] {
                     continue;
                 }
-                visited_set.insert(neighbor_id);
+                
+                // visited_set.insert(neighbor_id);
+                // 改进: set换成布尔数组
+                visited_bool[idx] = true; // visited[映射后的新元素索引] = true
 
                 // 看这个邻居值不值得进入候选池 / 结果池。
                 worst_result_id = self
@@ -411,14 +437,15 @@ impl HnswIndex {
 
     pub fn insert(&mut self, id: Id, data: Vector, ef_construction: usize, m: usize, m_max: usize) {
         self.timing.calls += 1;
-        let new_node_level = self.sample_level();
+        // 伪代码 line 4：随机采样新节点所在的最高层
+        let node_lvl = self.sample_level();
         let data_copy = data.clone();
-        let new_node = HnswNode::new(id, data_copy, new_node_level);
+        let new_node = HnswNode::new(id, data_copy, node_lvl);
         let mut id_similarity_cache: HashMap<Id, f32> = HashMap::new();
 
         if self.is_empty() {
             self.entry_node_id = Some(id);
-            self.index_max_level = new_node_level;
+            self.index_max_level = node_lvl;
             self.id_to_index.insert(id, self.nodes.len());
             self.nodes.push(new_node);
             return;
@@ -427,21 +454,26 @@ impl HnswIndex {
         self.id_to_index.insert(id, self.nodes.len());
         self.nodes.push(new_node);
 
+        // 伪代码 line 2-3：取全图入口点，作为逐层下降的起点
         let mut entry_point_id = self
             .get_entry_node_id()
             .expect("in insert, entry_node_id is none");
-        if self.index_max_level >= new_node_level + 1 {
+
+        // 伪代码 line 5-7：从顶层贪心下降到 node_lvl+1，只找最近邻更新入口点，不建边
+        if self.index_max_level >= node_lvl + 1 {
             let t = Instant::now();
-            for current_level in (new_node_level + 1..=self.index_max_level).rev() {
-                entry_point_id = self.greedy_search_at_level(&data, entry_point_id, current_level);
+            for current_lvl in (node_lvl + 1..=self.index_max_level).rev() {
+                entry_point_id = self.greedy_search_at_level(&data, entry_point_id, current_lvl);
             }
             self.timing.greedy_search_ns += t.elapsed().as_nanos();
         }
 
-        let min_level = std::cmp::min(self.index_max_level, new_node_level);
-        for current_lvl in (0..=min_level).rev() {
+        // 伪代码 line 8：从 min(全图最高层, 新节点层) 开始往下，逐层建边
+        let top_connect_lvl = std::cmp::min(self.index_max_level, node_lvl);
+        for current_lvl in (0..=top_connect_lvl).rev() {
+            // 伪代码 line 9：在当前层以 efConstruction 为候选池大小做 beam search
             let t = Instant::now();
-            let (result_set, sl_stats) = self.search_layer(
+            let (search_results, sl_stats) = self.search_layer(
                 &data,
                 entry_point_id,
                 current_lvl,
@@ -456,54 +488,63 @@ impl HnswIndex {
             self.timing.search_layer_bookkeeping_ns += sl_stats.candidate_bookkeeping_ns;
             self.timing.search_layer_loop_iterations += sl_stats.loop_iterations;
 
+            // 伪代码 line 10：从搜索结果中选出最近的 M 个点作为新节点的邻居
             let t = Instant::now();
-            let neighbors_set =
-                &self.select_neighbors_simple(&result_set, &data, m, &mut id_similarity_cache);
+            let selected_neighbors =
+                &self.select_neighbors_simple(&search_results, &data, m, &mut id_similarity_cache);
             self.timing.select_neighbors_ns += t.elapsed().as_nanos();
 
+            // 伪代码 line 11：为新节点与每个选中邻居建双向边
             let t = Instant::now();
-            for neighbor_node_id in neighbors_set {
-                self.add_neighbor_to_node_at_level(id, *neighbor_node_id, current_lvl);
-                self.add_neighbor_to_node_at_level(*neighbor_node_id, id, current_lvl);
+            for neighbor_id in selected_neighbors {
+                self.add_neighbor_to_node_at_level(id, *neighbor_id, current_lvl);
+                self.add_neighbor_to_node_at_level(*neighbor_id, id, current_lvl);
             }
             self.timing.link_ns += t.elapsed().as_nanos();
 
+            // 伪代码 line 12-16：检查每个新邻居的出度，超过 M_max 则裁剪
             let t = Instant::now();
-            for e_id in neighbors_set {
-                let e_conn_set: HashSet<u64> = {
-                    let e_node = self
-                        .get_node_by_id(*e_id)
-                        .expect("in insert, get_node_by_id cannot handle e_id");
-                    e_node.get_neighbors()[current_lvl]
+            for neighbor_id in selected_neighbors {
+                // 伪代码 line 13：读出该邻居在当前层的所有连接（含刚加入的新边）
+                let neighbor_current_connections: HashSet<u64> = {
+                    let neighbor_node = self
+                        .get_node_by_id(*neighbor_id)
+                        .expect("in insert, get_node_by_id cannot handle neighbor_id");
+                    neighbor_node.get_neighbors()[current_lvl]
                         .iter()
                         .copied()
                         .collect()
                 };
-                if e_conn_set.len() > m_max {
-                    let e_new_conn_vec: Vec<u64> = {
-                        let e_node = self
-                            .get_node_by_id(*e_id)
-                            .expect("in insert, get_node_by_id cannot handle e_id");
-                        let mut e_cache: HashMap<Id, f32> = HashMap::new();
+                // 伪代码 line 14：若出度超过上限，触发裁剪
+                if neighbor_current_connections.len() > m_max {
+                    // 伪代码 line 15：用 SELECT-NEIGHBORS 从现有连接里保留最优的 M_max 条
+                    let neighbor_pruned_connections: Vec<u64> = {
+                        let neighbor_node = self
+                            .get_node_by_id(*neighbor_id)
+                            .expect("in insert, get_node_by_id cannot handle neighbor_id");
+                        let mut neighbor_similarity_cache: HashMap<Id, f32> = HashMap::new();
                         self.select_neighbors_simple(
-                            &e_conn_set,
-                            e_node.get_data(),
+                            &neighbor_current_connections,
+                            neighbor_node.get_data(),
                             m_max,
-                            &mut e_cache,
+                            &mut neighbor_similarity_cache,
                         )
                     };
-                    let e_node = self
-                        .get_mut_node_by_id(*e_id)
-                        .expect("in insert, get_node_by_id cannot handle e_id");
-                    let old_neighbors = e_node.neighbors[current_lvl].clone();
-                    let old_set: HashSet<Id> = old_neighbors.iter().cloned().collect();
-                    let new_set: HashSet<Id> = e_new_conn_vec.iter().cloned().collect();
-                    let to_delete: HashSet<Id> = old_set.difference(&new_set).cloned().collect();
-                    e_node.neighbors[current_lvl] = e_new_conn_vec;
-                    for neighbor_to_delete_id in to_delete {
+                    // 伪代码 line 16：将该邻居的连接表替换为裁剪结果，同步删除被裁掉的反向边
+                    let neighbor_node = self
+                        .get_mut_node_by_id(*neighbor_id)
+                        .expect("in insert, get_node_by_id cannot handle neighbor_id");
+                    let old_connections: HashSet<Id> =
+                        neighbor_node.neighbors[current_lvl].iter().cloned().collect();
+                    let new_connections: HashSet<Id> =
+                        neighbor_pruned_connections.iter().cloned().collect();
+                    let connections_to_remove: HashSet<Id> =
+                        old_connections.difference(&new_connections).cloned().collect();
+                    neighbor_node.neighbors[current_lvl] = neighbor_pruned_connections;
+                    for removed_neighbor_id in connections_to_remove {
                         self.delete_neighbor_relationship_at_level(
-                            *e_id,
-                            neighbor_to_delete_id,
+                            *neighbor_id,
+                            removed_neighbor_id,
                             current_lvl,
                         );
                     }
@@ -511,14 +552,16 @@ impl HnswIndex {
             }
             self.timing.pruning_ns += t.elapsed().as_nanos();
 
+            // 伪代码 line 17：将本层结果中离新节点最近的点设为下一层的入口
             entry_point_id = self
-                .get_nearest(&mut id_similarity_cache, &result_set, &data)
+                .get_nearest(&mut id_similarity_cache, &search_results, &data)
                 .expect("searchh_result_id赋值错误");
         }
 
-        if new_node_level > self.index_max_level {
+        // 伪代码 line 18-19：若新节点层高超过全图最高层，更新全图入口点
+        if node_lvl > self.index_max_level {
             self.entry_node_id = Some(id);
-            self.index_max_level = new_node_level;
+            self.index_max_level = node_lvl;
         }
     }
 

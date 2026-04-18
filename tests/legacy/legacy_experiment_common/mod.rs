@@ -1,7 +1,7 @@
 // Shared helpers for legacy handcrafted experiment tests.
 // 这些 helper 只服务于旧版手搓数据集实验，不属于正式测试基础设施。
 
-use toy_vector_db::{
+use azusa::{
     distance::similarity,
     index::hnsw::HnswIndex,
     types::{Id, Metric, Vector},

@@ -5,7 +5,7 @@
 mod legacy_handcrafted_cases;
 use legacy_handcrafted_cases::*;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use toy_vector_db::{index::hnsw::HnswIndex, types::Id};
+use azusa::{index::hnsw::HnswIndex, types::Id};
 
 /// id: u64, data: Vec<f32>, lvl: usize
 /// 构图 helper
@@ -34,7 +34,7 @@ fn expected_search_knn_ids(case: &HnswTestCase) -> Vec<Id> {
         .map(|(id, data, _)| {
             (
                 *id,
-                toy_vector_db::distance::cosine_similarity(&case.query, data),
+                azusa::distance::cosine_similarity(&case.query, data),
             )
         })
         .collect();
@@ -151,9 +151,9 @@ fn test_search_knn_unique_ranking_case() {
             let left_node = index.get_node_by_id(pair[0]).expect("left node not found");
             let right_node = index.get_node_by_id(pair[1]).expect("right node not found");
             let left_score =
-                toy_vector_db::distance::cosine_similarity(&test_query, left_node.get_data());
+                azusa::distance::cosine_similarity(&test_query, left_node.get_data());
             let right_score =
-                toy_vector_db::distance::cosine_similarity(&test_query, right_node.get_data());
+                azusa::distance::cosine_similarity(&test_query, right_node.get_data());
 
             left_score >= right_score
         }),

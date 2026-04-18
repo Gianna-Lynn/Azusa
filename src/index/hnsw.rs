@@ -5,8 +5,8 @@ use crate::types::{Id, Metric};
 
 #[path = "hnsw_impl.rs"]
 mod hnsw_impl;
-#[path = "hnsw_legacy_experiment.rs"]
-mod hnsw_legacy_experiment;
+#[path = "hnsw_legacy.rs"]
+mod hnsw_legacy;
 #[path = "hnsw_node.rs"]
 mod hnsw_node;
 #[path = "hnsw_stats.rs"]

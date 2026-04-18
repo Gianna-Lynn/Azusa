@@ -1,5 +1,5 @@
-// Legacy-only experiment helpers.
-// 这个文件只服务于早期手搓数据集实验，不属于正式 HNSW 实现路径。
+// Legacy-only helpers.
+// 这个文件只服务于旧路径 / 兼容测试，不属于正式 HNSW 实现路径。
 
 use crate::types::{Id, Vector};
 
@@ -9,10 +9,9 @@ use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 impl HnswIndex {
-    // 仅用于早期手搓数据集实验。
-    // 这个接口服务于旧版参数 sweep / 旧测试，不属于正式检索路径。
+    // 仅用于旧版参数 sweep / 兼容测试，不属于正式检索路径。
     // 它允许从外部指定入口点开始搜索，主要是为了复现实验条件。
-    pub fn search_knn_from_entry_for_legacy_experiment(
+    pub fn search_knn_from_entry_for_legacy(
         &self,
         entrance_id: Option<Id>,
         query: &Vector,
@@ -24,7 +23,7 @@ impl HnswIndex {
         };
 
         let current_node = self.get_node_by_id(current_entry_id).expect(
-            "in search_knn_from_entry_for_legacy_experiment, failed to get id with current_entry_id",
+            "in search_knn_from_entry_for_legacy, failed to get id with current_entry_id",
         );
         for lvl in (1..=*current_node.get_node_max_level()).rev() {
             current_entry_id = self.greedy_search_at_level(query, current_entry_id, lvl);
@@ -52,16 +51,16 @@ impl HnswIndex {
         candidate_sequence.into_iter().take(k).collect()
     }
 
-    // 仅用于早期手搓数据集实验。
-    // 这个接口允许外部直接指定层高，主要为了复现最初那批手工构造数据集的实验条件。
+    // 仅用于旧路径 / 兼容测试。
+    // 这个接口允许外部直接指定层高，主要为了复现早期手工构造数据集的条件。
     // 正式插入路径应当使用 `insert`，由索引内部负责随机采样层高。
-    pub fn insert_with_fixed_level_for_legacy_experiment(
+    pub fn insert_with_fixed_level_for_legacy(
         &mut self,
         id: Id,
         data: Vector,
         ef_construction: usize,
-        m: usize,
-        m_max: usize,
+        max_neighbors_to_select: usize,
+        max_neighbors_to_keep: usize,
         level: &usize,
     ) {
         let new_node_level = *level;
@@ -108,7 +107,12 @@ impl HnswIndex {
             self.timing.search_layer_loop_iterations += sl_stats.loop_iterations;
 
             let neighbors_set =
-                self.select_neighbors_simple(&result_set, &data, m, &mut id_similarity_cache);
+                self.select_neighbors_simple(
+                    &result_set,
+                    &data,
+                    max_neighbors_to_select,
+                    &mut id_similarity_cache,
+                );
             for neighbor_node_id in &neighbors_set {
                 self.add_neighbor_to_node_at_level(id, *neighbor_node_id, current_lvl);
                 self.add_neighbor_to_node_at_level(*neighbor_node_id, id, current_lvl);
@@ -125,7 +129,7 @@ impl HnswIndex {
                         .collect()
                 };
 
-                if e_conn_set.len() > m_max {
+                if e_conn_set.len() > max_neighbors_to_keep {
                     let e_new_conn_vec: Vec<Id> = {
                         let e_node = self
                             .get_node_by_id(*e_id)
@@ -134,7 +138,7 @@ impl HnswIndex {
                         self.select_neighbors_simple(
                             &e_conn_set,
                             e_node.get_data(),
-                            m_max,
+                            max_neighbors_to_keep,
                             &mut e_cache,
                         )
                     };

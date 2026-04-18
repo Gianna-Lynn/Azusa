@@ -1,11 +1,11 @@
 // Legacy parameter sweep for handcrafted HNSW experiments.
 // 这不是正式回归测试，而是保留给早期手搓数据集的参数试验脚本。
 
-#[path = "legacy_experiment_common/mod.rs"]
-mod legacy_experiment_common;
+#[path = "legacy_test_common/mod.rs"]
+mod legacy_test_common;
 #[path = "legacy_handcrafted_cases.rs"]
 mod legacy_handcrafted_cases;
-use legacy_experiment_common::{build_index, ideal_answer_generator};
+use legacy_test_common::{build_index, ideal_answer_generator};
 use legacy_handcrafted_cases::*;
 
 use azusa::types::Id;
@@ -24,7 +24,7 @@ use azusa::types::Id;
 // fn build_index(nodes_data: Vec<(u64, Vec<f32>, usize)>, ef_construction: usize, m: usize, m_max: usize) -> HnswIndex {
 //     let mut index = HnswIndex::new();
 //     for (id, data, level) in nodes_data.iter() {
-//         index.insert_with_fixed_level_for_legacy_experiment(*id, data.clone(), ef_construction, m, m_max, level);
+//         index.insert_with_fixed_level_for_legacy(*id, data.clone(), ef_construction, m, m_max, level);
 //     }
 //     index
 // }
@@ -176,7 +176,7 @@ fn experiment_param_sweep() {
                 // 对每个 case：
                 // 算 expected
                 // 用当前参数建图
-                // 用当前 ef_search 调 search_knn_from_entry_for_legacy_experiment(...)
+                // 用当前 ef_search 调 search_knn_from_entry_for_legacy(...)
                 // 比较结果
 
                 // debug: 如果先let index, 后let expected_list: 前者利用值传递拿走了case.nodes_data, 后者想要整体借用case, rust不允许"部分字段已经被搬走后还想借用整个结构体"
@@ -187,7 +187,7 @@ fn experiment_param_sweep() {
                 let index = build_index(case.nodes_data.clone(), ef_construction, m, m_max);
                 // debug: 这个地方的expected_list最好完全独立于build_index.
                 // let expected_list = ideal_answer_generator(&index, &case.query, case.k);
-                let search_result_list = index.search_knn_from_entry_for_legacy_experiment(
+                let search_result_list = index.search_knn_from_entry_for_legacy(
                     case.entry_id,
                     &case.query,
                     case.k,

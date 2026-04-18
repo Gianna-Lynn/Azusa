@@ -15,7 +15,7 @@ fn build_index(nodes_data: Vec<(u64, Vec<f32>, usize)>) -> HnswIndex {
     let m = 2;
     let m_max = 4;
     for (id, data, level) in nodes_data.iter() {
-        index.insert_with_fixed_level_for_legacy_experiment(
+        index.insert_with_fixed_level_for_legacy(
             *id,
             data.clone(),
             ef_construction,

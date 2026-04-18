@@ -188,7 +188,40 @@ impl HnswIndex {
         }
     }
 
-    fn get_heap_extreme<T: Ord>(
+    fn get_heap_extreme_refer_alive_bool_vec<T: Ord>(
+        &self,
+        alive_bool_vec: &Vec<bool>,
+        heap: &mut BinaryHeap<(T, Id)>,
+        mode: HeapAccessMode,
+    ) -> Option<Id> {
+        match mode {
+            // 返回堆顶，但会跳过那些已经不在 alive_set 中的失效元素。
+            HeapAccessMode::PeekPruned => {
+                while let Some(top) = heap.peek() {
+                    // if alive_bool_vec.contains(&top.1) {
+                    if alive_bool_vec[self.id_to_index[&top.1]] {
+                        return Some(top.1);
+                    }
+                    heap.pop();
+                }
+                None
+            }
+            // 返回堆顶，同时把失效元素不断弹掉。
+            HeapAccessMode::PopAlive => {
+                while let Some(top) = heap.pop() {
+                    // if !alive_bool_vec.contains(&top.1) {
+                    if !alive_bool_vec[self.id_to_index[&top.1]] {
+                        continue;
+                    }
+                    return Some(top.1);
+                }
+                None
+            }
+        }
+    }
+
+
+    fn get_heap_extreme_refer_alive_set<T: Ord>(
         &self,
         alive_set: &HashSet<Id>,
         heap: &mut BinaryHeap<(T, Id)>,
@@ -256,7 +289,15 @@ impl HnswIndex {
         //                      实际上这么想就又错了, visited_bool 正因为是一维的，必须让下标语义变成节点位置, 而不是把节点位置写进值里
 
         // 候选点池，负责“下一步先扩展谁”。
-        let mut candidate_set: HashSet<Id> = HashSet::new();
+        // let mut candidate_set: HashSet<Id> = HashSet::new();
+        // 改进: set换成布尔数组
+        let mut candidate_alive: Vec<bool> = vec![false; self.nodes.len()];
+        // 注意:
+        // candidate_alive_num 是 candidate_alive 的“计数镜像”.
+        // 以后只要新增/删除 candidate 的入口, 必须同时维护这个计数.
+        // 否则 while candidate_alive_num > 0 会和真实活性状态脱节.
+        let mut candidate_alive_num : usize = 0;
+        
         let mut candidate_heap: BinaryHeap<(ordered_float::NotNan<f32>, Id)> = BinaryHeap::new();
         // 当前保留的最好点。
         let mut result_set: HashSet<Id> = HashSet::new();
@@ -268,7 +309,11 @@ impl HnswIndex {
         // 改进: set换成布尔数组
         visited_bool[self.id_to_index[&entry_id]] = true; // visited[映射后的新元素索引] = true
 
-        candidate_set.insert(entry_id);
+        // candidate_set.insert(entry_id);
+        // 改进: set换成布尔数组
+        candidate_alive[self.id_to_index[&entry_id]] = true;
+        candidate_alive_num += 1;
+
         let entry_similarity = self.get_similarity(id_similarity_cache, &entry_id, query);
         candidate_heap.push((
             ordered_float::NotNan::new(entry_similarity).unwrap(),
@@ -280,21 +325,24 @@ impl HnswIndex {
             entry_id,
         ));
 
-        while !candidate_set.is_empty() {
+        while candidate_alive_num > 0 {
             stats.loop_iterations += 1;
             // 先取出当前最值得继续展开的候选点。
             let current_candidate_id = self
-                .get_heap_extreme(
-                    &candidate_set,
+                .get_heap_extreme_refer_alive_bool_vec(
+                    &candidate_alive,
                     &mut candidate_heap,
                     HeapAccessMode::PopAlive,
                 )
                 .expect("current_candidate_id不存在");
-            candidate_set.remove(&current_candidate_id);
+            
+            // candidate_set.remove(&current_candidate_id);
+            candidate_alive[self.id_to_index[&current_candidate_id]] = false;
+            candidate_alive_num -= 1;
 
             // 如果候选点已经比结果池里最差的点还差，就可以提前停。
             let mut worst_result_id = self
-                .get_heap_extreme(&result_set, &mut result_heap, HeapAccessMode::PeekPruned)
+                .get_heap_extreme_refer_alive_set(&result_set, &mut result_heap, HeapAccessMode::PeekPruned)
                 .expect("worst_result_id不存在");
             let current_candidate_similarity =
                 self.get_similarity(id_similarity_cache, &current_candidate_id, query);
@@ -324,7 +372,7 @@ impl HnswIndex {
 
                 // 看这个邻居值不值得进入候选池 / 结果池。
                 worst_result_id = self
-                    .get_heap_extreme(&result_set, &mut result_heap, HeapAccessMode::PeekPruned)
+                    .get_heap_extreme_refer_alive_set(&result_set, &mut result_heap, HeapAccessMode::PeekPruned)
                     .expect("worst_result_id不存在");
                 let neighbor_similarity =
                     self.get_similarity(id_similarity_cache, &neighbor_id, query);
@@ -332,7 +380,11 @@ impl HnswIndex {
                     self.get_similarity(id_similarity_cache, &worst_result_id, query);
 
                 if neighbor_similarity >= worst_result_similarity || result_set.len() < ef {
-                    candidate_set.insert(neighbor_id);
+
+                    candidate_alive[self.id_to_index[&neighbor_id]] = true;
+                    candidate_alive_num += 1;
+
+
                     candidate_heap.push((
                         ordered_float::NotNan::new(neighbor_similarity).unwrap(),
                         neighbor_id,
@@ -344,7 +396,7 @@ impl HnswIndex {
                     ));
                     if result_set.len() > ef {
                         // 超过 ef 后，踢掉结果池里最差的点。
-                        if let Some(id_to_remove) = self.get_heap_extreme(
+                        if let Some(id_to_remove) = self.get_heap_extreme_refer_alive_set(
                             &result_set,
                             &mut result_heap,
                             HeapAccessMode::PeekPruned,
@@ -435,7 +487,14 @@ impl HnswIndex {
         level
     }
 
-    pub fn insert(&mut self, id: Id, data: Vector, ef_construction: usize, m: usize, m_max: usize) {
+    pub fn insert(
+        &mut self,
+        id: Id,
+        data: Vector,
+        ef_construction: usize,
+        max_neighbors_to_select: usize,  // 论文m
+        max_neighbors_to_keep: usize,    // 论文m_max
+    ) {
         self.timing.calls += 1;
         // 伪代码 line 4：随机采样新节点所在的最高层
         let node_lvl = self.sample_level();
@@ -488,10 +547,15 @@ impl HnswIndex {
             self.timing.search_layer_bookkeeping_ns += sl_stats.candidate_bookkeeping_ns;
             self.timing.search_layer_loop_iterations += sl_stats.loop_iterations;
 
-            // 伪代码 line 10：从搜索结果中选出最近的 M 个点作为新节点的邻居
+            // 伪代码 line 10：从搜索结果中选出最近的若干点作为新节点的邻居
             let t = Instant::now();
             let selected_neighbors =
-                &self.select_neighbors_simple(&search_results, &data, m, &mut id_similarity_cache);
+                &self.select_neighbors_simple(
+                    &search_results,
+                    &data,
+                    max_neighbors_to_select,
+                    &mut id_similarity_cache,
+                );
             self.timing.select_neighbors_ns += t.elapsed().as_nanos();
 
             // 伪代码 line 11：为新节点与每个选中邻居建双向边
@@ -502,7 +566,7 @@ impl HnswIndex {
             }
             self.timing.link_ns += t.elapsed().as_nanos();
 
-            // 伪代码 line 12-16：检查每个新邻居的出度，超过 M_max 则裁剪
+            // 伪代码 line 12-16：检查每个新邻居的出度，超过上限则裁剪
             let t = Instant::now();
             for neighbor_id in selected_neighbors {
                 // 伪代码 line 13：读出该邻居在当前层的所有连接（含刚加入的新边）
@@ -516,8 +580,8 @@ impl HnswIndex {
                         .collect()
                 };
                 // 伪代码 line 14：若出度超过上限，触发裁剪
-                if neighbor_current_connections.len() > m_max {
-                    // 伪代码 line 15：用 SELECT-NEIGHBORS 从现有连接里保留最优的 M_max 条
+                if neighbor_current_connections.len() > max_neighbors_to_keep {
+                    // 伪代码 line 15：用 SELECT-NEIGHBORS 从现有连接里保留最优的若干条
                     let neighbor_pruned_connections: Vec<u64> = {
                         let neighbor_node = self
                             .get_node_by_id(*neighbor_id)
@@ -526,20 +590,30 @@ impl HnswIndex {
                         self.select_neighbors_simple(
                             &neighbor_current_connections,
                             neighbor_node.get_data(),
-                            m_max,
+                            max_neighbors_to_keep,
                             &mut neighbor_similarity_cache,
                         )
                     };
                     // 伪代码 line 16：将该邻居的连接表替换为裁剪结果，同步删除被裁掉的反向边
+                    //
+                    // 这里邻接表的规模受 max_neighbors_to_keep 约束，通常很小，所以直接用 Vec::contains
+                    // 做小规模线性比对，往往比把旧/新连接都转成 HashSet 再做差集更划算：
+                    // 少分配、少哈希，也更 cache-friendly。
+                    let connections_to_remove: Vec<Id> = {
+                        let neighbor_node = self
+                            .get_node_by_id(*neighbor_id)
+                            .expect("in insert, get_node_by_id cannot handle neighbor_id");
+                        neighbor_node.neighbors[current_lvl]
+                            .iter()
+                            .copied()
+                            .filter(|connection_id| {
+                                !neighbor_pruned_connections.contains(connection_id)
+                            })
+                            .collect()
+                    };
                     let neighbor_node = self
                         .get_mut_node_by_id(*neighbor_id)
                         .expect("in insert, get_node_by_id cannot handle neighbor_id");
-                    let old_connections: HashSet<Id> =
-                        neighbor_node.neighbors[current_lvl].iter().cloned().collect();
-                    let new_connections: HashSet<Id> =
-                        neighbor_pruned_connections.iter().cloned().collect();
-                    let connections_to_remove: HashSet<Id> =
-                        old_connections.difference(&new_connections).cloned().collect();
                     neighbor_node.neighbors[current_lvl] = neighbor_pruned_connections;
                     for removed_neighbor_id in connections_to_remove {
                         self.delete_neighbor_relationship_at_level(
@@ -565,12 +639,12 @@ impl HnswIndex {
         }
     }
 
-    // 从候选点里选出前 m 个最相近的邻居。
+    // 从候选点里选出前若干个最相近的邻居。
     pub fn select_neighbors_simple(
         &self,
         candidate_set: &HashSet<Id>,
         query: &Vector,
-        m: usize,
+        max_neighbors_to_select: usize,
         cache: &mut HashMap<Id, f32>,
     ) -> Vec<Id> {
         let mut id_score_map: Vec<(u64, f32)> = candidate_set
@@ -581,7 +655,7 @@ impl HnswIndex {
             std::cmp::Ordering::Equal => a.0.cmp(&b.0),
             other => other,
         });
-        let take_count = m.min(id_score_map.len());
+        let take_count = max_neighbors_to_select.min(id_score_map.len());
         id_score_map
             .iter()
             .take(take_count)

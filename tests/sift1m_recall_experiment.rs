@@ -14,16 +14,16 @@
 mod sift1m_test_utils;
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
-
 use crate::sift1m_test_utils::*;
-use toy_vector_db::{distance::similarity, index::hnsw::HnswIndex, types::Metric};
+use azusa::{distance::similarity, index::hnsw::HnswIndex, types::Metric};
 const TEST_METRIC: Metric = Metric::L2;
 
 // base_limit   控制了我们从sift1m的文件里, 只读前多少条向量.
 // k            用来表达 "取得前几个最相似的结果."
 // ef_search    控制了我们在hnsw里搜索的时候, 最多看多少个节点. 这个参数越大, 搜索效果越好, 但是搜索速度越慢.
-// build_index 的参数也统一放在这里，方便你在顶部一键调参。
+// query_limit  控制了我们从sift1m的文件里, 只读前多少条查询向量. 这个参数越大, 实验结果越稳定, 但是测试时间越长.
 
+/**************************  参数配置  **************************/
 #[derive(Debug, Clone, Copy)]
 struct HnswBuildParams {
     ef_construction: usize,

@@ -40,10 +40,10 @@ struct Sift1mEfSearchSweepGroup {
 }
 
 const HNSW_IN_SIFT1M_PARAMS_GROUP: &[Sift1mEfSearchSweepGroup] = &[Sift1mEfSearchSweepGroup {
-    base_limit: 10000,
+    base_limit: 100000,
     k: 5,
-    ef_search: &[60, 80],
-    query_limit: 10,
+    ef_search: &[60, 80, 100, 150, 200, 300],
+    query_limit: 100,
 }];
 
 const DEFAULT_HNSW_BUILD_PARAMS: HnswBuildParams = HnswBuildParams {
@@ -101,21 +101,15 @@ fn run_sift1m_experiment_case(case: &Sift1mEfSearchSweepGroup) {
     for &ef_search in case.ef_search {
         let mut total_recall_at_k: f32 = 0.0;
         let mut total_exact_at_k = 0;
+        let mut total_search_time = Duration::default();
         println!(
             "--- base_limit={}, ef_search={} ---",
             case.base_limit, ef_search
         );
         for (idx, query_vec) in query_vecs.iter().enumerate() {
-            let query_no = idx + 1;
             let search_start = Instant::now();
             let search_result_ids = index.search_knn(query_vec, case.k, ef_search);
-            println!(
-                "  query[{}/{}] ef_search={} search_knn took: {:?}",
-                query_no,
-                case.query_limit,
-                ef_search,
-                search_start.elapsed()
-            );
+            total_search_time += search_start.elapsed();
             let brute_force_ids = &all_brute_force_ids[idx];
 
             let brute_set: HashSet<_> = brute_force_ids.iter().copied().collect();
@@ -138,6 +132,11 @@ fn run_sift1m_experiment_case(case: &Sift1mEfSearchSweepGroup) {
         println!(
             "SUMMARY: base_limit={}, k={}, ef_search={}, query_limit={}",
             case.base_limit, case.k, ef_search, case.query_limit
+        );
+        println!("  total_search_time = {:?}", total_search_time);
+        println!(
+            "  avg_search_time   = {:?}",
+            total_search_time / case.query_limit as u32
         );
         println!(
             "  recall@{} = [{}/{}]",

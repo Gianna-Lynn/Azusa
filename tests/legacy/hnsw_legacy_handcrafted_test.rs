@@ -1,12 +1,11 @@
-// TODO: 此文件由AGENT完成
+// Legacy handcrafted HNSW tests.
+// 这份文件主要验证早期手搓数据集在 legacy 实验构图路径下的行为。
 
-mod datasets;
-use datasets::*;
+#[path = "legacy_handcrafted_cases.rs"]
+mod legacy_handcrafted_cases;
+use legacy_handcrafted_cases::*;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use toy_vector_db::{
-    index::hnsw::HnswIndex,
-    types::Id,
-};
+use toy_vector_db::{index::hnsw::HnswIndex, types::Id};
 
 /// id: u64, data: Vec<f32>, lvl: usize
 /// 构图 helper
@@ -16,11 +15,17 @@ fn build_index(nodes_data: Vec<(u64, Vec<f32>, usize)>) -> HnswIndex {
     let m = 2;
     let m_max = 4;
     for (id, data, level) in nodes_data.iter() {
-        index.insert_fixed_level(*id, data.clone(), ef_construction, m, m_max, level);
+        index.insert_with_fixed_level_for_legacy_experiment(
+            *id,
+            data.clone(),
+            ef_construction,
+            m,
+            m_max,
+            level,
+        );
     }
     index
 }
-
 
 fn expected_search_knn_ids(case: &HnswTestCase) -> Vec<Id> {
     let mut scored_ids: Vec<(Id, f32)> = case
@@ -80,7 +85,10 @@ fn run_search_knn_case(case_name: &str, case: HnswTestCase) -> Result<(), String
             } else if let Some(message) = payload.downcast_ref::<&str>() {
                 Err((*message).to_string())
             } else {
-                Err(format!("{}: test panicked with a non-string payload", case_name))
+                Err(format!(
+                    "{}: test panicked with a non-string payload",
+                    case_name
+                ))
             }
         }
     }
@@ -161,20 +169,59 @@ fn test_search_knn_exact_cases() {
     let cases = [
         ("empty_case", empty_case as fn() -> HnswTestCase),
         ("single_node_case", single_node_case as fn() -> HnswTestCase),
-        ("unique_ranking_case", unique_ranking_case as fn() -> HnswTestCase),
+        (
+            "unique_ranking_case",
+            unique_ranking_case as fn() -> HnswTestCase,
+        ),
         ("multilevel_case", multilevel_case as fn() -> HnswTestCase),
-        ("identical_vectors_case", identical_vectors_case as fn() -> HnswTestCase),
-        ("duplicate_distance_case", duplicate_distance_case as fn() -> HnswTestCase),
-        ("collinear_points_case", collinear_points_case as fn() -> HnswTestCase),
-        ("clustered_distribution_case",clustered_distribution_case as fn() -> HnswTestCase,),
-        ("high_dimension_case", high_dimension_case as fn() -> HnswTestCase),
-        ("extreme_values_case", extreme_values_case as fn() -> HnswTestCase),
-        ("near_zero_distance_case", near_zero_distance_case as fn() -> HnswTestCase),
-        ("k_larger_than_dataset_case",k_larger_than_dataset_case as fn() -> HnswTestCase,),
-        ("tightly_packed_case", tightly_packed_case as fn() -> HnswTestCase),
-        ("extreme_ef_search_case", extreme_ef_search_case as fn() -> HnswTestCase),
-        ("negative_coordinates_case",negative_coordinates_case as fn() -> HnswTestCase,),
-        ("sparse_vectors_case", sparse_vectors_case as fn() -> HnswTestCase),
+        (
+            "identical_vectors_case",
+            identical_vectors_case as fn() -> HnswTestCase,
+        ),
+        (
+            "duplicate_distance_case",
+            duplicate_distance_case as fn() -> HnswTestCase,
+        ),
+        (
+            "collinear_points_case",
+            collinear_points_case as fn() -> HnswTestCase,
+        ),
+        (
+            "clustered_distribution_case",
+            clustered_distribution_case as fn() -> HnswTestCase,
+        ),
+        (
+            "high_dimension_case",
+            high_dimension_case as fn() -> HnswTestCase,
+        ),
+        (
+            "extreme_values_case",
+            extreme_values_case as fn() -> HnswTestCase,
+        ),
+        (
+            "near_zero_distance_case",
+            near_zero_distance_case as fn() -> HnswTestCase,
+        ),
+        (
+            "k_larger_than_dataset_case",
+            k_larger_than_dataset_case as fn() -> HnswTestCase,
+        ),
+        (
+            "tightly_packed_case",
+            tightly_packed_case as fn() -> HnswTestCase,
+        ),
+        (
+            "extreme_ef_search_case",
+            extreme_ef_search_case as fn() -> HnswTestCase,
+        ),
+        (
+            "negative_coordinates_case",
+            negative_coordinates_case as fn() -> HnswTestCase,
+        ),
+        (
+            "sparse_vectors_case",
+            sparse_vectors_case as fn() -> HnswTestCase,
+        ),
     ];
 
     let mut failures = Vec::new();
@@ -215,10 +262,7 @@ fn test_insert_single_node_minimal() {
 
     assert_eq!(index.len(), 1, "插入一个点后，图大小应为1");
 
-    assert!(
-        index.get_entry_node_id().is_some(),
-        "插入后应存在入口点"
-    );
+    assert!(index.get_entry_node_id().is_some(), "插入后应存在入口点");
     let entry_id = index.get_entry_node_id().expect("入口点不应为空");
     assert_eq!(entry_id, id, "入口点应为新插入的节点");
 
@@ -305,11 +349,7 @@ fn test_insert_multiple_nodes_connected() {
     }
 
     for (id, _) in nodes_data.iter() {
-        assert!(
-            index.get_node_by_id(*id).is_some(),
-            "节点{} 应该存在",
-            id
-        );
+        assert!(index.get_node_by_id(*id).is_some(), "节点{} 应该存在", id);
     }
 
     for (id, _) in nodes_data.iter() {
@@ -317,11 +357,7 @@ fn test_insert_multiple_nodes_connected() {
         let neighbors = node.get_neighbors();
 
         let has_neighbors = neighbors.iter().any(|layer| !layer.is_empty());
-        assert!(
-            has_neighbors,
-            "节点{} 应该至少有一个邻边（不应该悬空）",
-            id
-        );
+        assert!(has_neighbors, "节点{} 应该至少有一个邻边（不应该悬空）", id);
     }
 
     println!("Test 3 passed: 多个节点插入成功，没有悬空节点");
@@ -389,7 +425,10 @@ fn test_tricky_high_dimension() {
         case.expected_result_id,
         "high_dimension should return the exact best match first"
     );
-    assert!(result_vector.len() <= case.k, "result size should not exceed k");
+    assert!(
+        result_vector.len() <= case.k,
+        "result size should not exceed k"
+    );
 }
 
 #[test]
@@ -402,7 +441,10 @@ fn test_tricky_extreme_values() {
         case.expected_result_id,
         "extreme_values should return the exact best match first"
     );
-    assert!(result_vector.len() <= case.k, "result size should not exceed k");
+    assert!(
+        result_vector.len() <= case.k,
+        "result size should not exceed k"
+    );
 }
 
 #[test]
@@ -415,7 +457,10 @@ fn test_tricky_near_zero_distance() {
         case.expected_result_id,
         "near_zero_distance should return the closest node first"
     );
-    assert!(result_vector.len() <= case.k, "result size should not exceed k");
+    assert!(
+        result_vector.len() <= case.k,
+        "result size should not exceed k"
+    );
 }
 
 #[test]
@@ -440,7 +485,10 @@ fn test_tricky_tightly_packed() {
         case.expected_result_id,
         "tightly_packed should return the densest center first"
     );
-    assert!(result_vector.len() <= case.k, "result size should not exceed k");
+    assert!(
+        result_vector.len() <= case.k,
+        "result size should not exceed k"
+    );
 }
 
 #[test]
@@ -453,7 +501,10 @@ fn test_tricky_extreme_ef_search() {
         case.expected_result_id,
         "extreme_ef_search should still find the best node"
     );
-    assert!(result_vector.len() <= case.k, "result size should not exceed k");
+    assert!(
+        result_vector.len() <= case.k,
+        "result size should not exceed k"
+    );
 }
 
 #[test]
@@ -466,7 +517,10 @@ fn test_tricky_negative_coordinates() {
         case.expected_result_id,
         "negative_coordinates should return the correct nearest node first"
     );
-    assert!(result_vector.len() <= case.k, "result size should not exceed k");
+    assert!(
+        result_vector.len() <= case.k,
+        "result size should not exceed k"
+    );
 }
 
 #[test]
@@ -479,5 +533,8 @@ fn test_tricky_sparse_vectors() {
         case.expected_result_id,
         "sparse_vectors should return the sparse center first"
     );
-    assert!(result_vector.len() <= case.k, "result size should not exceed k");
+    assert!(
+        result_vector.len() <= case.k,
+        "result size should not exceed k"
+    );
 }

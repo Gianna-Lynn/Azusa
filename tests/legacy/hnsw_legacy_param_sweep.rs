@@ -1,12 +1,14 @@
-mod datasets;
-mod common;
-use datasets::*;
-use common::{build_index, ideal_answer_generator};
+// Legacy parameter sweep for handcrafted HNSW experiments.
+// 这不是正式回归测试，而是保留给早期手搓数据集的参数试验脚本。
+
+#[path = "legacy_experiment_common/mod.rs"]
+mod legacy_experiment_common;
+#[path = "legacy_handcrafted_cases.rs"]
+mod legacy_handcrafted_cases;
+use legacy_experiment_common::{build_index, ideal_answer_generator};
+use legacy_handcrafted_cases::*;
 
 use toy_vector_db::types::Id;
-
-
-
 
 // // 参数说明:
 // // - id: 新节点的唯一标识符
@@ -15,14 +17,14 @@ use toy_vector_db::types::Id;
 // //                    至于所谓的ef_search不会出现在这里, 是用于搜索函数的.
 // // - m: 每层连接的最大邻居数. 在插入新节点时, 每层最多连接m个邻居.
 // // - m_max: 每层允许的最大邻居数. 在插入新节点时, 如果某个节点的邻居数超过m_max, 就需要进行邻居选择和替换.
-    
+
 // /// id: u64, data: Vec<f32>, lvl: usize
 // /// v1 版本的构图 helper, 复制自hnsw_test_v1.rs
 // /// 人为指定每个节点所在的层次.
 // fn build_index(nodes_data: Vec<(u64, Vec<f32>, usize)>, ef_construction: usize, m: usize, m_max: usize) -> HnswIndex {
 //     let mut index = HnswIndex::new();
 //     for (id, data, level) in nodes_data.iter() {
-//         index.insert_fixed_level(*id, data.clone(), ef_construction, m, m_max, level);
+//         index.insert_with_fixed_level_for_legacy_experiment(*id, data.clone(), ef_construction, m, m_max, level);
 //     }
 //     index
 // }
@@ -71,14 +73,14 @@ macro_rules! add_test_cases {
     }};
 }
 
-fn selected_cases() -> (Vec<datasets::HnswTestCase>, Vec<String>){
+fn selected_cases() -> (Vec<legacy_handcrafted_cases::HnswTestCase>, Vec<String>) {
     add_test_cases!(
         // =============== 第一轮添加的case ===============
         // unique_ranking_case,
         // multilevel_case,
         // high_dimension_case,
         // negative_coordinates_case,
-        
+
         // =============== 第二轮添加的case ===============
         // two_node_case,
         // three_node_case,
@@ -105,7 +107,7 @@ fn selected_cases() -> (Vec<datasets::HnswTestCase>, Vec<String>){
         // crowded_near_neighbors_case,
         // single_bridge_chain_case,
         // highdim_bridge_case,
-        // 第三轮的结论: 
+        // 第三轮的结论:
         // 当前 harder cases 下，ef_search=4 不足以稳定返回完整 top-k
         // ef_search=8 可恢复正确结果
         // ef_search=16 暂未表现出明显高于 8 的收益
@@ -126,8 +128,9 @@ fn selected_cases() -> (Vec<datasets::HnswTestCase>, Vec<String>){
     )
 }
 
-#[test] #[ignore] 
-fn experiment_param_sweep(){
+#[test]
+#[ignore]
+fn experiment_param_sweep() {
     // 固定一些参数
     let ef_construction = 10;
     let ms = [2, 4];
@@ -136,65 +139,71 @@ fn experiment_param_sweep(){
 
     // 然后两层循环：
     // 外层扫 m
-    for m in ms{
+    for m in ms {
         // 中间自己算 m_max
         let m_max = 2 * m;
         // 内层扫 ef_search
-        for ef_search in ef_searches{
+        for ef_search in ef_searches {
             // improve: 在这里补一个参数标题打印.
-            println!("\n========== ef_construction={}, m={}, m_max={}, ef_search={} ==========", ef_construction, m, 2*m, ef_search);
+            println!(
+                "\n========== ef_construction={}, m={}, m_max={}, ef_search={} ==========",
+                ef_construction,
+                m,
+                2 * m,
+                ef_search
+            );
 
             // debug: 统计量的初始化应出现在这里.对于每一组参数(m, ef_search),对应一些统计量.
 
-            let mut total = 0;      //这组参数 (m, ef_search) 一共跑了多少个 case。
-            let mut top1_hit= 0;    //第一个结果命中的 case 个数
-            let mut exact_hit= 0; //有多少个 case 完全匹配
-            
-            
-            
-            
+            let mut total = 0; //这组参数 (m, ef_search) 一共跑了多少个 case。
+            let mut top1_hit = 0; //第一个结果命中的 case 个数
+            let mut exact_hit = 0; //有多少个 case 完全匹配
+
             let (cases, cases_names) = selected_cases(); //这一步是解构
-            
+
             // debug: 不能直接对 tuple 迭代，要先解构再 zip 配对.
             // for (case,case_names) in selected_cases() {
 
             // debug: zip:是拉链的意思, 把两个序列一一配对.
             for (case, case_name) in cases.into_iter().zip(cases_names.into_iter()) {
-
                 total += 1; //这组参数 (m, ef_search) 一共跑了多少个 case。
-                // Task 6：在每组参数里跑所有 selected cases
-                // 1
-                // 初始化统计量：
-                // debug: 统计量的初始化并不在这里.对于每一组参数(m, ef_search),对应一些统计量.
-
+                            // Task 6：在每组参数里跑所有 selected cases
+                            // 1
+                            // 初始化统计量：
+                            // debug: 统计量的初始化并不在这里.对于每一组参数(m, ef_search),对应一些统计量.
 
                 // 2
                 // 对每个 case：
                 // 算 expected
                 // 用当前参数建图
-                // 用当前 ef_search 调 search_knn_from_entry_for_experiment(...)
+                // 用当前 ef_search 调 search_knn_from_entry_for_legacy_experiment(...)
                 // 比较结果
 
                 // debug: 如果先let index, 后let expected_list: 前者利用值传递拿走了case.nodes_data, 后者想要整体借用case, rust不允许"部分字段已经被搬走后还想借用整个结构体"
                 //        解决方法是交换这两行, 先let expected_list借用, 后拿走case.nodes_data
                 //        解决方法更正: 第二步拿走case.nodes_data还不行,改成了clone()
                 let expected_list = ideal_answer_generator(&case, &case.query, case.k);
-                
+
                 let index = build_index(case.nodes_data.clone(), ef_construction, m, m_max);
                 // debug: 这个地方的expected_list最好完全独立于build_index.
                 // let expected_list = ideal_answer_generator(&index, &case.query, case.k);
-                let search_result_list = index.search_knn_from_entry_for_experiment(case.entry_id, &case.query,  case.k, ef_search);
+                let search_result_list = index.search_knn_from_entry_for_legacy_experiment(
+                    case.entry_id,
+                    &case.query,
+                    case.k,
+                    ef_search,
+                );
                 let search_result_list_len = search_result_list.len();
                 // 3
                 // 定义两个判断：
-                let mut top1_ok: bool = false;    //这个 case 的第一个结果是否命中
-                let mut exact_ok: bool = false;   //这个 case 的整个结果列表是否完全一致
+                let mut top1_ok: bool = false; //这个 case 的第一个结果是否命中
+                let mut exact_ok: bool = false; //这个 case 的整个结果列表是否完全一致
 
                 // debug: 改成宽容的逻辑，不用 assert! 打断整趟实验
                 //        空列表时，top1_ok = false；长度不等时，exact_ok = false；继续打印
                 if !expected_list.is_empty() && !search_result_list.is_empty() {
                     if expected_list[0] == search_result_list[0] {
-                        top1_ok = true; 
+                        top1_ok = true;
                         top1_hit += 1;
                     }
                 }
@@ -211,38 +220,43 @@ fn experiment_param_sweep(){
                 // }
                 // if exact_hit == len {exact_ok = true;}
 
-                if expected_list == search_result_list{
+                if expected_list == search_result_list {
                     exact_ok = true;
                     exact_hit += 1;
                 }
 
-
                 // improve: 添加一个新的试验指标 recall@k = 预测结果中与理想top-k重叠的数量 / k
                 use std::collections::HashSet;
                 let expected_set: HashSet<Id> = expected_list.iter().cloned().collect();
-                let overlap_count = search_result_list.iter()
+                let overlap_count = search_result_list
+                    .iter()
                     .filter(|id| expected_set.contains(id))
                     .count();
                 // .iter() 是对列表的迭代器，.filter() 是过滤器，保留那些在 expected_set 中的 id，最后 .count() 计算重叠的数量。
-                
+
                 let recall_at_k_score = overlap_count as f32 / case.k as f32;
 
                 // 5
                 // 打印：case 名字, top1 是否对,exact 是否对, expected 什么, got 什么
                 println!("  [{}]", case_name);
-                println!("    top1_ok={}, exact_ok={}, search_result_list_len={},  recall@{}={}", top1_ok, exact_ok, search_result_list_len, case.k, recall_at_k_score);
+                println!(
+                    "    top1_ok={}, exact_ok={}, search_result_list_len={},  recall@{}={}",
+                    top1_ok, exact_ok, search_result_list_len, case.k, recall_at_k_score
+                );
                 println!("    expected={:?}", expected_list);
                 println!("    got={:?}", search_result_list);
-                
             }
-        
-        // Task 7：打印每组参数的 summary, 一共 <m x ef_search> 这么多组.
-        // m, m_max, ef_construction, ef_search, top1_hit / total, exact_hit / total
-        println!("---");
-        println!("SUMMARY: ef_construction={}, m={}, m_max={}, ef_search={}", ef_construction, m, m_max, ef_search);
-        println!("  top1_hit / total = [{}/{}]", top1_hit, total);
-        println!("  exact_hit / total = [{}/{}]", exact_hit, total);
-        println!("===\n");
+
+            // Task 7：打印每组参数的 summary, 一共 <m x ef_search> 这么多组.
+            // m, m_max, ef_construction, ef_search, top1_hit / total, exact_hit / total
+            println!("---");
+            println!(
+                "SUMMARY: ef_construction={}, m={}, m_max={}, ef_search={}",
+                ef_construction, m, m_max, ef_search
+            );
+            println!("  top1_hit / total = [{}/{}]", top1_hit, total);
+            println!("  exact_hit / total = [{}/{}]", exact_hit, total);
+            println!("===\n");
         }
     }
 }

@@ -1,6 +1,9 @@
-use toy_vector_db::{search, storage::{VectorStore, inmemory::InMemoryVectorStore}};
+use toy_vector_db::{
+    search,
+    storage::{inmemory::InMemoryVectorStore, VectorStore},
+};
 
-fn main(){
+fn main() {
     println!("========================================");
     println!("    Toy Vector DB -v0.1  (booting up)   ");
     println!("========================================");
@@ -10,5 +13,5 @@ fn main(){
     store.insert(2, vec![2.0, 3.0, 4.0, 5.0]);
     store.insert(3, vec![3.0, 4.0, 5.0, 6.0]);
     let result = search::flat::search_flat(&store, &vec![2.0, 3.0, 4.0, 5.0], 2);
-    print!("{:?}",result)
+    print!("{:?}", result)
 }

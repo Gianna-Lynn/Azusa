@@ -15,15 +15,7 @@ use super::{HnswIndex, HnswNode};
 // =========================
 impl HnswIndex {
     pub fn new() -> Self {
-        Self {
-            nodes: Vec::new(),
-            entry_node_id: None,
-            index_max_level: 0,
-            metric: Metric::Cosine,
-            id_to_index: HashMap::new(),
-            rng: rand::rngs::StdRng::seed_from_u64(super::MY_SEED),
-            timing: super::hnsw_stats::InsertTimings::default(),
-        }
+        Self::new_with_metric(Metric::Cosine)
     }
 
     pub fn new_with_metric(metric: Metric) -> Self {
@@ -68,6 +60,10 @@ impl HnswIndex {
 // 节点与邻接表访问
 // =========================
 impl HnswIndex {
+    fn get_index_by_id(&self, target_id: Id) -> Option<usize> {
+        self.id_to_index.get(&target_id).copied()
+    }
+
     pub fn len(&self) -> usize {
         self.nodes.len()
     }
@@ -94,15 +90,12 @@ impl HnswIndex {
     }
 
     pub fn get_node_by_id(&self, target_id: Id) -> Option<&HnswNode> {
-        self.id_to_index.get(&target_id).map(|idx| &self.nodes[*idx])
+        self.get_index_by_id(target_id).map(|idx| &self.nodes[idx])
     }
 
     pub fn get_mut_node_by_id(&mut self, target_id: Id) -> Option<&mut HnswNode> {
-        if let Some(idx) = self.id_to_index.get(&target_id).copied() {
-            Some(&mut self.nodes[idx])
-        } else {
-            None
-        }
+        self.get_index_by_id(target_id)
+            .map(|idx| &mut self.nodes[idx])
     }
 
     pub fn add_neighbor_to_node_at_level(&mut self, node_id: Id, neighbor_id: Id, level: usize) {
@@ -113,14 +106,25 @@ impl HnswIndex {
     }
 
     pub fn delete_neighbor_relationship_at_all_levels(&mut self, node1_id: Id, node2_id: Id) {
+        self.delete_neighbor_relationship(node1_id, node2_id, None);
+    }
+
+    fn delete_neighbor_relationship(&mut self, node1_id: Id, node2_id: Id, level: Option<usize>) {
         let node1 = self
             .get_mut_node_by_id(node1_id)
             .expect("In function delete_neighbor_relationship, get_mut_node_by_id got None");
-        node1.delete_neighbor_single_direction_at_all_levels(node2_id);
+        match level {
+            Some(level) => node1.delete_neighbor_single_direction_at_level(node2_id, level),
+            None => node1.delete_neighbor_single_direction_at_all_levels(node2_id),
+        }
+
         let node2 = self
             .get_mut_node_by_id(node2_id)
             .expect("In function delete_neighbor_relationship, get_mut_node_by_id got None");
-        node2.delete_neighbor_single_direction_at_all_levels(node1_id);
+        match level {
+            Some(level) => node2.delete_neighbor_single_direction_at_level(node1_id, level),
+            None => node2.delete_neighbor_single_direction_at_all_levels(node1_id),
+        }
     }
 
     pub fn delete_neighbor_relationship_at_level(
@@ -129,14 +133,7 @@ impl HnswIndex {
         node2_id: Id,
         level: usize,
     ) {
-        let node1 = self
-            .get_mut_node_by_id(node1_id)
-            .expect("In function delete_neighbor_relationship, get_mut_node_by_id got None");
-        node1.delete_neighbor_single_direction_at_level(node2_id, level);
-        let node2 = self
-            .get_mut_node_by_id(node2_id)
-            .expect("In function delete_neighbor_relationship, get_mut_node_by_id got None");
-        node2.delete_neighbor_single_direction_at_level(node1_id, level);
+        self.delete_neighbor_relationship(node1_id, node2_id, Some(level));
     }
 
     pub fn get_neighbors_at_lvl(&self, id: Id, lvl: usize) -> HashSet<Id> {
@@ -144,7 +141,10 @@ impl HnswIndex {
         if lvl >= node_to_search.get_neighbors().len() {
             return HashSet::new();
         }
-        node_to_search.get_neighbors()[lvl].iter().cloned().collect()
+        node_to_search.get_neighbors()[lvl]
+            .iter()
+            .cloned()
+            .collect()
     }
 }
 
@@ -154,6 +154,26 @@ impl HnswIndex {
 impl HnswIndex {
     pub fn compute_similarity(&self, a: &Vector, b: &Vector) -> f32 {
         distance::similarity(a, b, self.metric)
+    }
+
+    pub(super) fn get_nearest(
+        &self,
+        id_similarity_cache: &mut HashMap<Id, f32>,
+        set: &HashSet<Id>,
+        query: &Vector,
+    ) -> Option<Id> {
+        let mut max_similarity = f32::NEG_INFINITY;
+        let mut max_elem_id: Option<Id> = None;
+
+        for elem_id in set {
+            let temp_similarity = self.get_similarity(id_similarity_cache, elem_id, query);
+            if temp_similarity > max_similarity {
+                max_similarity = temp_similarity;
+                max_elem_id = Some(*elem_id);
+            }
+        }
+
+        max_elem_id
     }
 
     pub fn get_similarity(
@@ -233,7 +253,10 @@ impl HnswIndex {
         visited_set.insert(entry_id);
         candidate_set.insert(entry_id);
         let entry_similarity = self.get_similarity(id_similarity_cache, &entry_id, query);
-        candidate_heap.push((ordered_float::NotNan::new(entry_similarity).unwrap(), entry_id));
+        candidate_heap.push((
+            ordered_float::NotNan::new(entry_similarity).unwrap(),
+            entry_id,
+        ));
         result_set.insert(entry_id);
         result_heap.push((
             std::cmp::Reverse(ordered_float::NotNan::new(entry_similarity).unwrap()),
@@ -244,7 +267,11 @@ impl HnswIndex {
             stats.loop_iterations += 1;
             // 先取出当前最值得继续展开的候选点。
             let current_candidate_id = self
-                .get_heap_extreme(&candidate_set, &mut candidate_heap, HeapAccessMode::PopAlive)
+                .get_heap_extreme(
+                    &candidate_set,
+                    &mut candidate_heap,
+                    HeapAccessMode::PopAlive,
+                )
                 .expect("current_candidate_id不存在");
             candidate_set.remove(&current_candidate_id);
 
@@ -261,7 +288,8 @@ impl HnswIndex {
             }
 
             // 展开当前候选点的邻居。
-            let current_candidate_neighbors = self.get_neighbors_at_lvl(current_candidate_id, level);
+            let current_candidate_neighbors =
+                self.get_neighbors_at_lvl(current_candidate_id, level);
             for neighbor_id in current_candidate_neighbors {
                 if visited_set.contains(&neighbor_id) {
                     continue;
@@ -272,7 +300,8 @@ impl HnswIndex {
                 worst_result_id = self
                     .get_heap_extreme(&result_set, &mut result_heap, HeapAccessMode::PeekPruned)
                     .expect("worst_result_id不存在");
-                let neighbor_similarity = self.get_similarity(id_similarity_cache, &neighbor_id, query);
+                let neighbor_similarity =
+                    self.get_similarity(id_similarity_cache, &neighbor_id, query);
                 let worst_result_similarity =
                     self.get_similarity(id_similarity_cache, &worst_result_id, query);
 
@@ -289,9 +318,11 @@ impl HnswIndex {
                     ));
                     if result_set.len() > ef {
                         // 超过 ef 后，踢掉结果池里最差的点。
-                        if let Some(id_to_remove) =
-                            self.get_heap_extreme(&result_set, &mut result_heap, HeapAccessMode::PeekPruned)
-                        {
+                        if let Some(id_to_remove) = self.get_heap_extreme(
+                            &result_set,
+                            &mut result_heap,
+                            HeapAccessMode::PeekPruned,
+                        ) {
                             result_set.remove(&id_to_remove);
                         }
                     }
@@ -343,8 +374,13 @@ impl HnswIndex {
         }
 
         let mut id_similarity_cache: HashMap<Id, f32> = HashMap::new();
-        let (candidate_set, _) =
-            self.search_layer(query, current_entry_id, 0, ef_search, &mut id_similarity_cache);
+        let (candidate_set, _) = self.search_layer(
+            query,
+            current_entry_id,
+            0,
+            ef_search,
+            &mut id_similarity_cache,
+        );
 
         let mut candidate_sequence: Vec<Id> = candidate_set.into_iter().collect();
         candidate_sequence.sort_by(|id1, id2| {
@@ -405,8 +441,13 @@ impl HnswIndex {
         let min_level = std::cmp::min(self.index_max_level, new_node_level);
         for current_lvl in (0..=min_level).rev() {
             let t = Instant::now();
-            let (result_set, sl_stats) =
-                self.search_layer(&data, entry_point_id, current_lvl, ef_construction, &mut id_similarity_cache);
+            let (result_set, sl_stats) = self.search_layer(
+                &data,
+                entry_point_id,
+                current_lvl,
+                ef_construction,
+                &mut id_similarity_cache,
+            );
             self.timing.search_layer_ns += t.elapsed().as_nanos();
             self.timing.search_layer_compute_sim_ns += sl_stats.compute_sim_ns;
             self.timing.search_layer_furthest_scan_ns += sl_stats.furthest_scan_ns;
@@ -416,7 +457,8 @@ impl HnswIndex {
             self.timing.search_layer_loop_iterations += sl_stats.loop_iterations;
 
             let t = Instant::now();
-            let neighbors_set = &self.select_neighbors_simple(&result_set, &data, m, &mut id_similarity_cache);
+            let neighbors_set =
+                &self.select_neighbors_simple(&result_set, &data, m, &mut id_similarity_cache);
             self.timing.select_neighbors_ns += t.elapsed().as_nanos();
 
             let t = Instant::now();
@@ -432,7 +474,10 @@ impl HnswIndex {
                     let e_node = self
                         .get_node_by_id(*e_id)
                         .expect("in insert, get_node_by_id cannot handle e_id");
-                    e_node.get_neighbors()[current_lvl].iter().copied().collect()
+                    e_node.get_neighbors()[current_lvl]
+                        .iter()
+                        .copied()
+                        .collect()
                 };
                 if e_conn_set.len() > m_max {
                     let e_new_conn_vec: Vec<u64> = {
@@ -440,7 +485,12 @@ impl HnswIndex {
                             .get_node_by_id(*e_id)
                             .expect("in insert, get_node_by_id cannot handle e_id");
                         let mut e_cache: HashMap<Id, f32> = HashMap::new();
-                        self.select_neighbors_simple(&e_conn_set, e_node.get_data(), m_max, &mut e_cache)
+                        self.select_neighbors_simple(
+                            &e_conn_set,
+                            e_node.get_data(),
+                            m_max,
+                            &mut e_cache,
+                        )
                     };
                     let e_node = self
                         .get_mut_node_by_id(*e_id)
@@ -451,13 +501,16 @@ impl HnswIndex {
                     let to_delete: HashSet<Id> = old_set.difference(&new_set).cloned().collect();
                     e_node.neighbors[current_lvl] = e_new_conn_vec;
                     for neighbor_to_delete_id in to_delete {
-                        self.delete_neighbor_relationship_at_level(*e_id, neighbor_to_delete_id, current_lvl);
+                        self.delete_neighbor_relationship_at_level(
+                            *e_id,
+                            neighbor_to_delete_id,
+                            current_lvl,
+                        );
                     }
                 }
             }
             self.timing.pruning_ns += t.elapsed().as_nanos();
 
-            // TODO: 这里可以换成堆实现
             entry_point_id = self
                 .get_nearest(&mut id_similarity_cache, &result_set, &data)
                 .expect("searchh_result_id赋值错误");
@@ -486,6 +539,10 @@ impl HnswIndex {
             other => other,
         });
         let take_count = m.min(id_score_map.len());
-        id_score_map.iter().take(take_count).map(|(id, _)| *id).collect()
+        id_score_map
+            .iter()
+            .take(take_count)
+            .map(|(id, _)| *id)
+            .collect()
     }
 }

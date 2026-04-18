@@ -1,5 +1,5 @@
-use crate::types::{Id, Record, Vector};
 use super::VectorStore;
+use crate::types::{Id, Record, Vector};
 use serde_json;
 
 /********************************************** Storage **********************************************/

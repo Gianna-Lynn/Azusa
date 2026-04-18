@@ -23,22 +23,6 @@ impl HnswNode {
         }
     }
 
-    pub fn add_neighbor(&mut self, neighbor_id: Id, level_to_add: usize) {
-        if level_to_add < self.neighbors.len() {
-            self.neighbors[level_to_add].push(neighbor_id);
-        }
-    }
-
-    pub fn delete_neighbor_single_direction_at_all_levels(&mut self, neighbor_id: Id) {
-        for i in 0..=self.node_max_level {
-            self.neighbors[i].retain(|&id| id != neighbor_id);
-        }
-    }
-
-    pub fn delete_neighbor_single_direction_at_level(&mut self, neighbor_id: Id, level: usize) {
-        self.neighbors[level].retain(|&id| id != neighbor_id);
-    }
-
     pub fn get_id(&self) -> &Id {
         &self.id
     }
@@ -53,5 +37,21 @@ impl HnswNode {
 
     pub fn get_neighbors(&self) -> &Vec<Vec<u64>> {
         &self.neighbors
+    }
+
+    pub fn add_neighbor(&mut self, neighbor_id: Id, level_to_add: usize) {
+        if level_to_add < self.neighbors.len() {
+            self.neighbors[level_to_add].push(neighbor_id);
+        }
+    }
+
+    pub fn delete_neighbor_single_direction_at_all_levels(&mut self, neighbor_id: Id) {
+        for i in 0..=self.node_max_level {
+            self.neighbors[i].retain(|&id| id != neighbor_id);
+        }
+    }
+
+    pub fn delete_neighbor_single_direction_at_level(&mut self, neighbor_id: Id, level: usize) {
+        self.neighbors[level].retain(|&id| id != neighbor_id);
     }
 }

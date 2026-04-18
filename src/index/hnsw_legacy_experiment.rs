@@ -1,13 +1,18 @@
-use std::collections::{HashMap, HashSet};
-use std::time::Instant;
+// Legacy-only experiment helpers.
+// 这个文件只服务于早期手搓数据集实验，不属于正式 HNSW 实现路径。
 
 use crate::types::{Id, Vector};
 
 use super::{HnswIndex, HnswNode};
 
+use std::collections::{HashMap, HashSet};
+use std::time::Instant;
+
 impl HnswIndex {
-    // 实验: 从指定入口点开始做搜索，方便参数 sweep。
-    pub fn search_knn_from_entry_for_experiment(
+    // 仅用于早期手搓数据集实验。
+    // 这个接口服务于旧版参数 sweep / 旧测试，不属于正式检索路径。
+    // 它允许从外部指定入口点开始搜索，主要是为了复现实验条件。
+    pub fn search_knn_from_entry_for_legacy_experiment(
         &self,
         entrance_id: Option<Id>,
         query: &Vector,
@@ -18,15 +23,21 @@ impl HnswIndex {
             return Vec::new();
         };
 
-        let current_node = self
-            .get_node_by_id(current_entry_id)
-            .expect("in search_knn_from_entry_for_experiment, failed to get id with current_entry_id");
+        let current_node = self.get_node_by_id(current_entry_id).expect(
+            "in search_knn_from_entry_for_legacy_experiment, failed to get id with current_entry_id",
+        );
         for lvl in (1..=*current_node.get_node_max_level()).rev() {
             current_entry_id = self.greedy_search_at_level(query, current_entry_id, lvl);
         }
 
         let mut id_similarity_cache: HashMap<Id, f32> = HashMap::new();
-        let (candidate_set, _) = self.search_layer(query, current_entry_id, 0, ef_search, &mut id_similarity_cache);
+        let (candidate_set, _) = self.search_layer(
+            query,
+            current_entry_id,
+            0,
+            ef_search,
+            &mut id_similarity_cache,
+        );
 
         let mut candidate_sequence: Vec<Id> = candidate_set.into_iter().collect();
         candidate_sequence.sort_by(|id1, id2| {
@@ -41,8 +52,10 @@ impl HnswIndex {
         candidate_sequence.into_iter().take(k).collect()
     }
 
-    // 实验: 固定层高插入，主要供测试和 sweep 使用。
-    pub fn insert_fixed_level(
+    // 仅用于早期手搓数据集实验。
+    // 这个接口允许外部直接指定层高，主要为了复现最初那批手工构造数据集的实验条件。
+    // 正式插入路径应当使用 `insert`，由索引内部负责随机采样层高。
+    pub fn insert_with_fixed_level_for_legacy_experiment(
         &mut self,
         id: Id,
         data: Vector,
@@ -67,7 +80,9 @@ impl HnswIndex {
         self.id_to_index.insert(id, self.nodes.len());
         self.nodes.push(new_node);
 
-        let mut entry_point_id = self.get_entry_node_id().expect("in insert, entry_node_id is none");
+        let mut entry_point_id = self
+            .get_entry_node_id()
+            .expect("in insert, entry_node_id is none");
         if self.index_max_level >= new_node_level + 1 {
             for current_level in (new_node_level + 1..=self.index_max_level).rev() {
                 entry_point_id = self.greedy_search_at_level(&data, entry_point_id, current_level);
@@ -77,7 +92,13 @@ impl HnswIndex {
         let min_level = std::cmp::min(self.index_max_level, new_node_level);
         for current_lvl in (0..=min_level).rev() {
             let t = Instant::now();
-            let (result_set, sl_stats) = self.search_layer(&data, entry_point_id, current_lvl, ef_construction, &mut id_similarity_cache);
+            let (result_set, sl_stats) = self.search_layer(
+                &data,
+                entry_point_id,
+                current_lvl,
+                ef_construction,
+                &mut id_similarity_cache,
+            );
             self.timing.search_layer_ns += t.elapsed().as_nanos();
             self.timing.search_layer_compute_sim_ns += sl_stats.compute_sim_ns;
             self.timing.search_layer_furthest_scan_ns += sl_stats.furthest_scan_ns;
@@ -86,7 +107,8 @@ impl HnswIndex {
             self.timing.search_layer_bookkeeping_ns += sl_stats.candidate_bookkeeping_ns;
             self.timing.search_layer_loop_iterations += sl_stats.loop_iterations;
 
-            let neighbors_set = self.select_neighbors_simple(&result_set, &data, m, &mut id_similarity_cache);
+            let neighbors_set =
+                self.select_neighbors_simple(&result_set, &data, m, &mut id_similarity_cache);
             for neighbor_node_id in &neighbors_set {
                 self.add_neighbor_to_node_at_level(id, *neighbor_node_id, current_lvl);
                 self.add_neighbor_to_node_at_level(*neighbor_node_id, id, current_lvl);
@@ -97,7 +119,10 @@ impl HnswIndex {
                     let e_node = self
                         .get_node_by_id(*e_id)
                         .expect("in insert, get_node_by_id cannot handle e_id");
-                    e_node.get_neighbors()[current_lvl].iter().copied().collect()
+                    e_node.get_neighbors()[current_lvl]
+                        .iter()
+                        .copied()
+                        .collect()
                 };
 
                 if e_conn_set.len() > m_max {
@@ -106,7 +131,12 @@ impl HnswIndex {
                             .get_node_by_id(*e_id)
                             .expect("in insert, get_node_by_id cannot handle e_id");
                         let mut e_cache: HashMap<Id, f32> = HashMap::new();
-                        self.select_neighbors_simple(&e_conn_set, e_node.get_data(), m_max, &mut e_cache)
+                        self.select_neighbors_simple(
+                            &e_conn_set,
+                            e_node.get_data(),
+                            m_max,
+                            &mut e_cache,
+                        )
                     };
 
                     let e_node = self
@@ -118,7 +148,11 @@ impl HnswIndex {
                     let to_delete: HashSet<Id> = old_set.difference(&new_set).cloned().collect();
                     e_node.neighbors[current_lvl] = e_new_conn_vec;
                     for neighbor_to_delete_id in to_delete {
-                        self.delete_neighbor_relationship_at_level(*e_id, neighbor_to_delete_id, current_lvl);
+                        self.delete_neighbor_relationship_at_level(
+                            *e_id,
+                            neighbor_to_delete_id,
+                            current_lvl,
+                        );
                     }
                 }
             }

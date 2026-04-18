@@ -1,10 +1,13 @@
+// Shared helpers for legacy handcrafted experiment tests.
+// 这些 helper 只服务于旧版手搓数据集实验，不属于正式测试基础设施。
+
 use toy_vector_db::{
     distance::similarity,
     index::hnsw::HnswIndex,
     types::{Id, Metric, Vector},
 };
 
-use super::datasets::HnswTestCase;
+use super::legacy_handcrafted_cases::HnswTestCase;
 
 const TEST_METRIC: Metric = Metric::Cosine;
 
@@ -27,7 +30,14 @@ pub fn build_index(
 ) -> HnswIndex {
     let mut index = HnswIndex::new_with_metric(TEST_METRIC);
     for (id, data, level) in nodes_data.iter() {
-        index.insert_fixed_level(*id, data.clone(), ef_construction, m, m_max, level);
+        index.insert_with_fixed_level_for_legacy_experiment(
+            *id,
+            data.clone(),
+            ef_construction,
+            m,
+            m_max,
+            level,
+        );
     }
     index
 }

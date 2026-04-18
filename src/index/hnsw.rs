@@ -3,16 +3,14 @@ use std::collections::HashMap;
 
 use crate::types::{Id, Metric};
 
-#[path = "hnsw_legacy.rs"]
-mod hnsw_legacy;
-#[path = "hnsw_experiment.rs"]
-mod hnsw_experiment;
+#[path = "hnsw_impl.rs"]
+mod hnsw_impl;
+#[path = "hnsw_legacy_experiment.rs"]
+mod hnsw_legacy_experiment;
 #[path = "hnsw_node.rs"]
 mod hnsw_node;
 #[path = "hnsw_stats.rs"]
 mod hnsw_stats;
-#[path = "hnsw_impl.rs"]
-mod hnsw_impl;
 
 pub use hnsw_node::HnswNode;
 pub use hnsw_stats::{HeapAccessMode, InsertTimings, SearchLayerStats};

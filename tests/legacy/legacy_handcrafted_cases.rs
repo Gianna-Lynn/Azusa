@@ -1,3 +1,6 @@
+// Legacy handcrafted and synthetic HNSW experiment cases.
+// 这些 case 主要服务于早期手搓数据集测试与参数 sweep，不是正式数据集夹具。
+
 #![allow(dead_code)]
 
 pub type NodeData = (u64, Vec<f32>, usize);
@@ -15,10 +18,7 @@ pub struct HnswTestCase {
 
 pub fn two_node_case() -> HnswTestCase {
     HnswTestCase {
-        nodes_data: vec![
-            (1, vec![1.0, 2.0, 3.0], 3),
-            (2, vec![2.0, 3.0, 4.0], 4),
-        ],
+        nodes_data: vec![(1, vec![1.0, 2.0, 3.0], 3), (2, vec![2.0, 3.0, 4.0], 4)],
         query: vec![1.0, 0.0, 0.0],
         entry_id: Some(1),
         expected_result_id: None,
@@ -432,7 +432,6 @@ pub fn sparse_vectors_case() -> HnswTestCase {
     }
 }
 
-
 pub fn bridge_trap_case() -> HnswTestCase {
     HnswTestCase {
         nodes_data: vec![
@@ -440,10 +439,8 @@ pub fn bridge_trap_case() -> HnswTestCase {
             (1, vec![10.0, 0.0], 2),
             (2, vec![9.5, 0.5], 1),
             (3, vec![9.0, 1.0], 0),
-
             // 桥
             (4, vec![5.0, 5.0], 1),
-
             // 右团
             (5, vec![1.0, 9.0], 0),
             (6, vec![0.5, 9.5], 1),
@@ -471,11 +468,9 @@ pub fn weak_bridge_two_clusters_case() -> HnswTestCase {
             (3, vec![9.5, 0.6], 1),
             (4, vec![9.2, 0.9], 0),
             (5, vec![8.9, 1.2], 0),
-
             // 弱桥
             (6, vec![6.0, 4.0], 1),
             (7, vec![5.0, 5.0], 0),
-
             // 右团（正确团）
             (8, vec![1.2, 8.8], 0),
             (9, vec![0.9, 9.1], 1),
@@ -509,7 +504,6 @@ pub fn crowded_near_neighbors_case() -> HnswTestCase {
             (5, vec![4.90, 5.10], 0),
             (6, vec![5.15, 4.85], 0),
             (7, vec![4.85, 5.15], 0),
-
             // 一些干扰点
             (8, vec![7.0, 3.0], 1),
             (9, vec![3.0, 7.0], 1),
@@ -539,10 +533,8 @@ pub fn single_bridge_chain_case() -> HnswTestCase {
             (2, vec![9.0, 1.0], 2),
             (3, vec![8.0, 2.0], 1),
             (4, vec![7.0, 3.0], 0),
-
             // 唯一桥点
             (5, vec![5.0, 5.0], 1),
-
             // 右侧长链（正确方向）
             (6, vec![3.0, 7.0], 0),
             (7, vec![2.0, 8.0], 1),
@@ -567,16 +559,13 @@ pub fn highdim_bridge_case() -> HnswTestCase {
             (1, vec![10.0, 0.0, 0.0, 0.0, 0.0, 0.0], 3),
             (2, vec![9.5, 0.5, 0.0, 0.0, 0.0, 0.0], 2),
             (3, vec![9.0, 1.0, 0.0, 0.0, 0.0, 0.0], 1),
-
             // 桥
             (4, vec![5.0, 5.0, 0.0, 0.0, 0.0, 0.0], 1),
             (5, vec![4.0, 6.0, 0.0, 0.0, 0.0, 0.0], 0),
-
             // 右团
             (6, vec![1.0, 9.0, 0.0, 0.0, 0.0, 0.0], 0),
             (7, vec![0.5, 9.5, 0.0, 0.0, 0.0, 0.0], 1),
             (8, vec![0.0, 10.0, 0.0, 0.0, 0.0, 0.0], 3),
-
             // 干扰维度点
             (9, vec![0.0, 0.0, 10.0, 0.0, 0.0, 0.0], 1),
             (10, vec![0.0, 0.0, 0.0, 10.0, 0.0, 0.0], 1),
@@ -604,7 +593,7 @@ pub fn highdim_bridge_case() -> HnswTestCase {
 pub fn sparse_four_clusters_case() -> HnswTestCase {
     let mut nodes = vec![];
     let mut id_counter = 1u64;
-    
+
     // 团1：(10, 0) 中心附近 - 12个点
     for i in 0..12 {
         let angle = i as f32 * std::f32::consts::PI / 6.0;
@@ -613,7 +602,7 @@ pub fn sparse_four_clusters_case() -> HnswTestCase {
         nodes.push((id_counter, vec![x, y], 2));
         id_counter += 1;
     }
-    
+
     // 团2：(0, 10) 中心附近 - 12个点
     for i in 0..12 {
         let angle = i as f32 * std::f32::consts::PI / 6.0;
@@ -622,7 +611,7 @@ pub fn sparse_four_clusters_case() -> HnswTestCase {
         nodes.push((id_counter, vec![x, y], 2));
         id_counter += 1;
     }
-    
+
     // 团3：(-10, 0) 中心附近 - 12个点
     for i in 0..12 {
         let angle = i as f32 * std::f32::consts::PI / 6.0;
@@ -631,7 +620,7 @@ pub fn sparse_four_clusters_case() -> HnswTestCase {
         nodes.push((id_counter, vec![x, y], 2));
         id_counter += 1;
     }
-    
+
     // 团4：(0, -10) 中心附近 - 12个点
     for i in 0..12 {
         let angle = i as f32 * std::f32::consts::PI / 6.0;
@@ -640,10 +629,10 @@ pub fn sparse_four_clusters_case() -> HnswTestCase {
         nodes.push((id_counter, vec![x, y], 2));
         id_counter += 1;
     }
-    
+
     HnswTestCase {
         nodes_data: nodes,
-        query: vec![10.3, 0.2],  // 查询在团1内
+        query: vec![10.3, 0.2], // 查询在团1内
         entry_id: Some(1),
         expected_result_id: Some(1),
         level: 0,
@@ -658,25 +647,31 @@ pub fn sparse_four_clusters_case() -> HnswTestCase {
 pub fn dense_single_cluster_case() -> HnswTestCase {
     let mut nodes = vec![];
     let mut id_counter = 1u64;
-    
+
     // 中心在 (5, 5)，半径 2 内均匀分布 ~80 个点
     let radius = 2.0;
     let center_x = 5.0;
     let center_y = 5.0;
-    
+
     for i in 0..80 {
         let angle = (i as f32) * 2.0 * std::f32::consts::PI / 80.0;
         let r = (i as f32 / 80.0) * radius;
         let x = center_x + r * angle.cos();
         let y = center_y + r * angle.sin();
-        let level = if i < 10 { 2 } else if i < 30 { 1 } else { 0 };
+        let level = if i < 10 {
+            2
+        } else if i < 30 {
+            1
+        } else {
+            0
+        };
         nodes.push((id_counter, vec![x, y], level));
         id_counter += 1;
     }
-    
+
     HnswTestCase {
         nodes_data: nodes,
-        query: vec![5.05, 5.05],  // 查询在中心附近
+        query: vec![5.05, 5.05], // 查询在中心附近
         entry_id: Some(1),
         expected_result_id: Some(1),
         level: 0,
@@ -691,28 +686,28 @@ pub fn dense_single_cluster_case() -> HnswTestCase {
 pub fn pyramid_hierarchy_case() -> HnswTestCase {
     let mut nodes = vec![];
     let mut id_counter = 1u64;
-    
+
     // 第0层（底部）：稀疏，8个点，离中心远
     for i in 0..8 {
         let angle = i as f32 * std::f32::consts::PI / 4.0;
         nodes.push((id_counter, vec![15.0 * angle.cos(), 15.0 * angle.sin()], 0));
         id_counter += 1;
     }
-    
+
     // 第1层：16个点，距离适中
     for i in 0..16 {
         let angle = i as f32 * std::f32::consts::PI / 8.0;
         nodes.push((id_counter, vec![10.0 * angle.cos(), 10.0 * angle.sin()], 1));
         id_counter += 1;
     }
-    
+
     // 第2层：32个点，靠近中心
     for i in 0..32 {
         let angle = i as f32 * std::f32::consts::PI / 16.0;
         nodes.push((id_counter, vec![5.0 * angle.cos(), 5.0 * angle.sin()], 1));
         id_counter += 1;
     }
-    
+
     // 第3层（中心）：44个点，极其紧密
     for i in 0..44 {
         let angle = i as f32 * std::f32::consts::PI / 22.0;
@@ -720,11 +715,11 @@ pub fn pyramid_hierarchy_case() -> HnswTestCase {
         nodes.push((id_counter, vec![r * angle.cos(), r * angle.sin()], 2));
         id_counter += 1;
     }
-    
+
     HnswTestCase {
         nodes_data: nodes,
-        query: vec![0.1, 0.1],  // 查询在最中心
-        entry_id: Some(1),      // 从底层开始查询
+        query: vec![0.1, 0.1], // 查询在最中心
+        entry_id: Some(1),     // 从底层开始查询
         expected_result_id: None,
         level: 0,
         k: 12,
@@ -738,23 +733,29 @@ pub fn pyramid_hierarchy_case() -> HnswTestCase {
 pub fn layered_strips_case() -> HnswTestCase {
     let mut nodes = vec![];
     let mut id_counter = 1u64;
-    
+
     // 5条平行线，每条 18 个点
     for strip_idx in 0..5 {
-        let y = (strip_idx as f32 - 2.0) * 4.0;  // y: -8, -4, 0, 4, 8
-        
+        let y = (strip_idx as f32 - 2.0) * 4.0; // y: -8, -4, 0, 4, 8
+
         for i in 0..18 {
             let x = (i as f32 - 8.5) * 1.0;
-            let level = if i == 9 { 2 } else if i >= 4 && i <= 14 { 1 } else { 0 };
+            let level = if i == 9 {
+                2
+            } else if i >= 4 && i <= 14 {
+                1
+            } else {
+                0
+            };
             nodes.push((id_counter, vec![x, y], level));
             id_counter += 1;
         }
     }
-    
+
     HnswTestCase {
         nodes_data: nodes,
-        query: vec![0.0, 0.1],  // 查询在中间线条
-        entry_id: Some(10),     // 从底层开始
+        query: vec![0.0, 0.1], // 查询在中间线条
+        entry_id: Some(10),    // 从底层开始
         expected_result_id: None,
         level: 0,
         k: 10,
@@ -768,29 +769,35 @@ pub fn layered_strips_case() -> HnswTestCase {
 pub fn radial_star_case() -> HnswTestCase {
     let mut nodes = vec![];
     let mut id_counter = 1u64;
-    
+
     // 中心点
     nodes.push((id_counter, vec![0.0, 0.0], 3));
     id_counter += 1;
-    
+
     // 8条射线，每条 8 个点
     for ray_idx in 0..8 {
         let angle = ray_idx as f32 * std::f32::consts::PI / 4.0;
-        
+
         for dist_idx in 1..=8 {
             let r = dist_idx as f32 * 1.5;
             let x = r * angle.cos();
             let y = r * angle.sin();
-            let level = if dist_idx <= 2 { 2 } else if dist_idx <= 5 { 1 } else { 0 };
+            let level = if dist_idx <= 2 {
+                2
+            } else if dist_idx <= 5 {
+                1
+            } else {
+                0
+            };
             nodes.push((id_counter, vec![x, y], level));
             id_counter += 1;
         }
     }
-    
+
     HnswTestCase {
         nodes_data: nodes,
-        query: vec![1.5, 1.5],  // 查询在左下射线附近
-        entry_id: Some(1),      // 从中心开始
+        query: vec![1.5, 1.5], // 查询在左下射线附近
+        entry_id: Some(1),     // 从中心开始
         expected_result_id: None,
         level: 0,
         k: 8,
@@ -802,22 +809,21 @@ pub fn radial_star_case() -> HnswTestCase {
 // 第二阶段结束
 // ================================================================
 
-
 // 团 A → 桥 1 → 团 B → 桥 2 → 团 C
 // A 是起点附近的错误大团
 // C 是 query 所在的正确大团
 // B 是中间过渡团
 // 两个桥都很关键
-// 只要有一处桥不够牢，搜索就容易被困在前面 
-pub fn multi_cluster_chain_case() ->HnswTestCase{
+// 只要有一处桥不够牢，搜索就容易被困在前面
+pub fn multi_cluster_chain_case() -> HnswTestCase {
     let mut nodes = vec![];
     let mut id_counter = 1u64;
 
     let a_x = 0;
     let a_y = 0;
-   
+
     // 团A: 16个点, 中心(0,0)
-    for i in 0..16{
+    for i in 0..16 {
         let angle = i as f32 * std::f32::consts::PI / 8.0;
         let lvl = if i == 0 {
             3
@@ -829,15 +835,18 @@ pub fn multi_cluster_chain_case() ->HnswTestCase{
             0
         };
         let r = if i <= 7 { 0.8 } else { 1.3 };
-        nodes.push((id_counter, vec![a_x as f32 + r * angle.cos(), a_y as f32 + r * angle.sin()], lvl));
+        nodes.push((
+            id_counter,
+            vec![a_x as f32 + r * angle.cos(), a_y as f32 + r * angle.sin()],
+            lvl,
+        ));
         id_counter += 1;
     }
-
 
     let b_x = 12;
     let b_y = 0;
     // 团B: 16个点, 中心(12,0)
-    for i in 0..7{
+    for i in 0..7 {
         let angle = i as f32 * std::f32::consts::PI / 4.0;
         let lvl = if i == 0 {
             3
@@ -849,14 +858,18 @@ pub fn multi_cluster_chain_case() ->HnswTestCase{
             0
         };
         let r = if i <= 7 { 0.8 } else { 1.3 };
-        nodes.push((id_counter, vec![b_x as f32 + r * angle.cos(), b_y as f32 + r * angle.sin()], lvl));
+        nodes.push((
+            id_counter,
+            vec![b_x as f32 + r * angle.cos(), b_y as f32 + r * angle.sin()],
+            lvl,
+        ));
         id_counter += 1;
     }
 
-    let c_x =24;
-    let c_y =0;
+    let c_x = 24;
+    let c_y = 0;
     // 团C: 16个点, 中心(24,0)
-    for i in 0..16{
+    for i in 0..16 {
         let angle = i as f32 * std::f32::consts::PI / 8.0;
         let lvl = if i == 0 {
             3
@@ -868,27 +881,31 @@ pub fn multi_cluster_chain_case() ->HnswTestCase{
             0
         };
         let r = if i <= 7 { 0.8 } else { 1.3 };
-        nodes.push((id_counter, vec![c_x as f32 + r * angle.cos(), c_y as f32 + r * angle.sin()], lvl));
+        nodes.push((
+            id_counter,
+            vec![c_x as f32 + r * angle.cos(), c_y as f32 + r * angle.sin()],
+            lvl,
+        ));
         id_counter += 1;
     }
-    
+
     //桥1
-    nodes.push((id_counter, vec![6.0, 0.2] ,0));
+    nodes.push((id_counter, vec![6.0, 0.2], 0));
     id_counter += 1;
     // nodes.push((id_counter, vec![6.0, -0.2] ,1));
     // id_counter += 1;
     //桥2
-    nodes.push((id_counter, vec![18.0, 0.2] ,0));
+    nodes.push((id_counter, vec![18.0, 0.2], 0));
     // nodes.push((id_counter, vec![18.0, -0.2] ,1));
     // id_counter += 1;
 
-    HnswTestCase{
+    HnswTestCase {
         nodes_data: nodes,
         query: vec![24.8, 0.1], //更偏向于C团
-        entry_id : Some(1),
-        expected_result_id : None,
+        entry_id: Some(1),
+        expected_result_id: None,
         level: 0,
         k: 8,
-        ef_search: 16
+        ef_search: 16,
     }
 }

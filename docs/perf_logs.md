@@ -121,3 +121,50 @@ Experiment: `SIFT1M recall sweep after removing neighbor to_vec`
 
 - 这版结果用于保留“workspace/stamp 保持不变, 只去掉邻居 `to_vec()`”后的基线。
 - 和 2026年4月19日11:40:03 那版相比, 建图时间基本回到同一水平, 查询耗时在各档 `ef_search` 下整体更低。
+
+## 2026-04-20
+
+Experiment: `SIFT1M recall sweep after removing result_set hot-path maintenance`
+
+- base_limit: `100000`
+- k: `5`
+- query_limit: `100`
+- ef_construction: `80`
+- m: `4`
+- m_max: `8`
+- metric: `L2`
+- change: `search_layer` 改为仅用 `result_heap` 维护结果集, 去掉 `result_set + lazy deletion` 热路径维护
+
+### Build Summary
+
+| item | value |
+| --- | ---: |
+| build_index time | 27.9259546s |
+| ground truth time | 1.2853574s |
+| insert count | 100000 |
+
+### Insert Timings
+
+| phase | time | share |
+| --- | ---: | ---: |
+| greedy_search | 2.71s | 9.8% |
+| search_layer | 22.96s | 83.3% |
+
+### Query Results
+
+| ef_search | total_search_time | avg_search_time | recall@5 | exact@5 |
+| --------: | ----------------: | --------------: | -------: | ------: |
+|        60 |          18.7443ms |         187.443us |    72.8% |     35% |
+|        80 |          25.6416ms |         256.416us |    77.0% |     44% |
+|       100 |          28.1949ms |         281.949us |    79.6% |     47% |
+|       150 |          39.3195ms |         393.195us |    83.2% |     52% |
+|       200 |          52.2370ms |         522.370us |    86.8% |     60% |
+|       300 |          71.9258ms |         719.258us |    90.6% |     70% |
+
+### Notes
+
+- 这版结果用于记录“去掉 `result_set` 热路径维护, 改为 `result_heap` 单独维护结果集”后的表现。
+- 和同日“去掉邻居 `to_vec()`”那版基线相比, 建图时间从 `30.2196078s` 降到 `27.9259546s`, 约快 `7.6%`。
+- `search_layer` 插入耗时从 `25.37s` 降到 `22.96s`, 约快 `9.5%`, 说明 `result_set + lazy deletion` 确实是主要常数热点之一。
+- `recall@5` 与 `exact@5` 在各档 `ef_search` 下保持不变, 说明这次优化没有改变搜索语义。
+- 查询侧整体接近持平, `ef_search=60` 和 `150` 略快, `80/200/300` 附近有小幅波动, 当前主要收益仍然集中在建图阶段。

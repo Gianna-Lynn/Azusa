@@ -26,6 +26,6 @@ pub struct InsertTimings {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HeapAccessMode {
-    PeekPruned,
-    PopAlive,
+    Peek,
+    Pop,
 }

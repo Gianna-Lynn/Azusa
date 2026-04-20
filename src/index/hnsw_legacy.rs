@@ -12,7 +12,7 @@ impl HnswIndex {
     // 仅用于旧版参数 sweep / 兼容测试，不属于正式检索路径。
     // 它允许从外部指定入口点开始搜索，主要是为了复现实验条件。
     pub fn search_knn_from_entry_for_legacy(
-        &self,
+        &mut self,
         entrance_id: Option<Id>,
         query: &Vector,
         k: usize,

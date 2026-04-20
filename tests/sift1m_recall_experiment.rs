@@ -70,7 +70,7 @@ fn run_sift1m_experiment_case(case: &Sift1mEfSearchSweepGroup) {
     let base_vecs = read_fvecs(&base_bytes, case.base_limit);
 
     let build_start = Instant::now();
-    let index = build_index(&base_vecs, DEFAULT_HNSW_BUILD_PARAMS);
+    let mut index = build_index(&base_vecs, DEFAULT_HNSW_BUILD_PARAMS);
     println!(
         "base_limit={} build_index took: {:?}",
         case.base_limit,
@@ -237,7 +237,7 @@ fn run_hnsw_in_sift1m_case_groundtruth(
     let base_bytes = load_sift_bytes("data//sift1m//sift//sift_base.fvecs")
         .expect("in function run_hnsw_in_sift1m_case, load base_bytes error");
     let base_vecs = read_fvecs(&base_bytes, base_limit);
-    let index = build_index(&base_vecs, DEFAULT_HNSW_BUILD_PARAMS);
+    let mut index = build_index(&base_vecs, DEFAULT_HNSW_BUILD_PARAMS);
     index.print_timings();
 
     let query_bytes = load_sift_bytes("data//sift1m//sift//sift_query.fvecs")

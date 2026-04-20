@@ -5,6 +5,7 @@ use std::time::Instant;
 use rand::{Rng, SeedableRng};
 
 use crate::distance;
+use crate::index::hnsw::SearchLayerWorkspace;
 use crate::types::{Id, Metric, Vector};
 
 use super::hnsw_stats::{HeapAccessMode, SearchLayerStats};
@@ -27,6 +28,7 @@ impl HnswIndex {
             id_to_index: HashMap::new(),
             rng: rand::rngs::StdRng::seed_from_u64(super::MY_SEED),
             timing: super::hnsw_stats::InsertTimings::default(),
+            workspace: SearchLayerWorkspace::new()
         }
     }
 
@@ -140,6 +142,17 @@ impl HnswIndex {
         let node_to_search = self.get_node_by_id(id).expect("get_node_by_id不存在");
         &node_to_search.get_neighbors()[lvl]
     }
+
+    // 大橘写的: 为了保留 workspace/stamp 设计, 同时避开 search_layer 里对邻居列表的 to_vec 复制.
+    fn get_neighbors_at_lvl_from_parts<'a>(
+        nodes: &'a [HnswNode],
+        id_to_index: &HashMap<Id, usize>,
+        id: Id,
+        lvl: usize,
+    ) -> &'a [Id] {
+        let node_idx = id_to_index[&id];
+        &nodes[node_idx].get_neighbors()[lvl]
+    }
 }
 
 // =========================
@@ -188,29 +201,44 @@ impl HnswIndex {
         }
     }
 
+    // 大橘写的: 和上面的邻居 helper 配套, 直接基于拆开的字段取相似度, 减少 search_layer 对整个 self 的借用压力.
+    fn get_similarity_from_parts(
+        nodes: &[HnswNode],
+        id_to_index: &HashMap<Id, usize>,
+        metric: Metric,
+        id_similarity_cache: &mut HashMap<Id, f32>,
+        target_id: &Id,
+        query: &Vector,
+    ) -> f32 {
+        if let Some(similarity) = id_similarity_cache.get(target_id) {
+            *similarity
+        } else {
+            let node_idx = id_to_index[target_id];
+            let new_similarity = distance::similarity(nodes[node_idx].get_data(), query, metric);
+            id_similarity_cache.insert(*target_id, new_similarity);
+            new_similarity
+        }
+    }
+
     fn get_heap_extreme_refer_alive_bool_vec<T: Ord>(
-        &self,
+        id_to_index: &HashMap<Id, usize>,
         alive_bool_vec: &Vec<bool>,
         heap: &mut BinaryHeap<(T, Id)>,
         mode: HeapAccessMode,
     ) -> Option<Id> {
         match mode {
-            // 返回堆顶，但会跳过那些已经不在 alive_set 中的失效元素。
             HeapAccessMode::PeekPruned => {
                 while let Some(top) = heap.peek() {
-                    // if alive_bool_vec.contains(&top.1) {
-                    if alive_bool_vec[self.id_to_index[&top.1]] {
+                    if alive_bool_vec[id_to_index[&top.1]] {
                         return Some(top.1);
                     }
                     heap.pop();
                 }
                 None
             }
-            // 返回堆顶，同时把失效元素不断弹掉。
             HeapAccessMode::PopAlive => {
                 while let Some(top) = heap.pop() {
-                    // if !alive_bool_vec.contains(&top.1) {
-                    if !alive_bool_vec[self.id_to_index[&top.1]] {
+                    if !alive_bool_vec[id_to_index[&top.1]] {
                         continue;
                     }
                     return Some(top.1);
@@ -222,7 +250,6 @@ impl HnswIndex {
 
 
     fn get_heap_extreme_refer_alive_set<T: Ord>(
-        &self,
         alive_set: &HashSet<Id>,
         heap: &mut BinaryHeap<(T, Id)>,
         mode: HeapAccessMode,
@@ -255,15 +282,23 @@ impl HnswIndex {
 // =========================
 // 图搜索
 // =========================
+
+
 impl HnswIndex {
     pub fn search_layer(
-        &self,
+        &mut self,
         query: &Vector,
         entry_id: Id,
         level: usize,
         ef: usize,
         id_similarity_cache: &mut HashMap<Id, f32>,
     ) -> (HashSet<Id>, SearchLayerStats) {
+
+        self.workspace.reset(self.nodes.len());
+        let nodes = &self.nodes;
+        let id_to_index = &self.id_to_index;
+        let metric = self.metric;
+        let workspace = &mut self.workspace;
 
         // 旧的思路:
         // “堆负责快速找到极值，set 负责维护这个元素是否仍然属于当前有效集合；
@@ -277,7 +312,11 @@ impl HnswIndex {
         // let mut visited_set: HashSet<Id> = HashSet::new();
         // 改进: set换成布尔数组
         // 已访问过的点, 使用布尔数组实现.替代旧版本的visited_set, hashset实现.
-        let mut visited_bool: Vec<bool> = vec![false; self.nodes.len()]; //初始化足够长,避免后续的随机访问下标越界
+        // let mut visited_bool: Vec<bool> = vec![false; self.nodes.len()]; //初始化足够长,避免后续的随机访问下标越界
+        
+        
+        
+
         // visited_bool的下标不能直接使用id, 那样会让规模直接爆炸. 
         // 需要建立一个映射, 让向量的id被映射到visited_bool里面的索引idx.
         // 目前HnswIndex中已经自带一个id_to_index: HashMap<Id, usize>, 或许不需要我们在这里手动新建.
@@ -291,36 +330,44 @@ impl HnswIndex {
         // 候选点池，负责“下一步先扩展谁”。
         // let mut candidate_set: HashSet<Id> = HashSet::new();
         // 改进: set换成布尔数组
-        let mut candidate_alive: Vec<bool> = vec![false; self.nodes.len()];
+        // let mut candidate_alive: Vec<bool> = vec![false; self.nodes.len()];
+
+
         // 注意:
         // candidate_alive_num 是 candidate_alive 的“计数镜像”.
         // 以后只要新增/删除 candidate 的入口, 必须同时维护这个计数.
         // 否则 while candidate_alive_num > 0 会和真实活性状态脱节.
         let mut candidate_alive_num : usize = 0;
         
-        let mut candidate_heap: BinaryHeap<(ordered_float::NotNan<f32>, Id)> = BinaryHeap::new();
+        // let mut candidate_heap: BinaryHeap<(ordered_float::NotNan<f32>, Id)> = BinaryHeap::new();
         // 当前保留的最好点。
         let mut result_set: HashSet<Id> = HashSet::new();
-        let mut result_heap: BinaryHeap<(std::cmp::Reverse<ordered_float::NotNan<f32>>, Id)> =
-            BinaryHeap::new();
 
         // 入口点先进入三套状态。
         // visited_set.insert(entry_id);
         // 改进: set换成布尔数组
-        visited_bool[self.id_to_index[&entry_id]] = true; // visited[映射后的新元素索引] = true
+        // visited_bool[self.id_to_index[&entry_id]] = true; // visited[映射后的新元素索引] = true
 
-        // candidate_set.insert(entry_id);
-        // 改进: set换成布尔数组
-        candidate_alive[self.id_to_index[&entry_id]] = true;
+        workspace.visited_marks[id_to_index[&entry_id]] = workspace.visited_epoch;
+
+        workspace.candidate_alive[id_to_index[&entry_id]] = true;
+
         candidate_alive_num += 1;
 
-        let entry_similarity = self.get_similarity(id_similarity_cache, &entry_id, query);
-        candidate_heap.push((
+        let entry_similarity = Self::get_similarity_from_parts(
+            nodes,
+            id_to_index,
+            metric,
+            id_similarity_cache,
+            &entry_id,
+            query,
+        );
+        workspace.candidate_heap.push((
             ordered_float::NotNan::new(entry_similarity).unwrap(),
             entry_id,
         ));
         result_set.insert(entry_id);
-        result_heap.push((
+        workspace.result_heap.push((
             std::cmp::Reverse(ordered_float::NotNan::new(entry_similarity).unwrap()),
             entry_id,
         ));
@@ -328,77 +375,106 @@ impl HnswIndex {
         while candidate_alive_num > 0 {
             stats.loop_iterations += 1;
             // 先取出当前最值得继续展开的候选点。
-            let current_candidate_id = self
-                .get_heap_extreme_refer_alive_bool_vec(
-                    &candidate_alive,
-                    &mut candidate_heap,
+            let current_candidate_id = Self::get_heap_extreme_refer_alive_bool_vec(
+                    id_to_index,
+                    &workspace.candidate_alive,
+                    &mut workspace.candidate_heap,
                     HeapAccessMode::PopAlive,
                 )
                 .expect("current_candidate_id不存在");
+
             
             // candidate_set.remove(&current_candidate_id);
-            candidate_alive[self.id_to_index[&current_candidate_id]] = false;
+            workspace.candidate_alive[id_to_index[&current_candidate_id]] = false;
             candidate_alive_num -= 1;
 
             // 如果候选点已经比结果池里最差的点还差，就可以提前停。
-            let mut worst_result_id = self
-                .get_heap_extreme_refer_alive_set(&result_set, &mut result_heap, HeapAccessMode::PeekPruned)
+            let mut worst_result_id = Self::get_heap_extreme_refer_alive_set(&result_set, &mut workspace.result_heap, HeapAccessMode::PeekPruned)
                 .expect("worst_result_id不存在");
-            let current_candidate_similarity =
-                self.get_similarity(id_similarity_cache, &current_candidate_id, query);
-            let worst_result_similarity =
-                self.get_similarity(id_similarity_cache, &worst_result_id, query);
+            let current_candidate_similarity = Self::get_similarity_from_parts(
+                nodes,
+                id_to_index,
+                metric,
+                id_similarity_cache,
+                &current_candidate_id,
+                query,
+            );
+            let worst_result_similarity = Self::get_similarity_from_parts(
+                nodes,
+                id_to_index,
+                metric,
+                id_similarity_cache,
+                &worst_result_id,
+                query,
+            );
             if current_candidate_similarity < worst_result_similarity {
                 break;
             }
 
-            // 展开当前候选点的邻居。
             let current_candidate_neighbors =
-                self.get_neighbors_at_lvl(current_candidate_id, level);
+                Self::get_neighbors_at_lvl_from_parts(nodes, id_to_index, current_candidate_id, level);
             for &neighbor_id in current_candidate_neighbors {
                 
                 // if visited_set.contains(&neighbor_id) {
                 //     continue;
                 // }
                 // 改进: 使用布尔数组
-                let idx = self.id_to_index[&neighbor_id];
-                if visited_bool[idx] {
+                let idx = id_to_index[&neighbor_id];
+                // if visited_bool[idx] {
+                //     continue;
+                // }
+
+                if workspace.visited_marks[idx] == workspace.visited_epoch{
                     continue;
                 }
                 
                 // visited_set.insert(neighbor_id);
                 // 改进: set换成布尔数组
-                visited_bool[idx] = true; // visited[映射后的新元素索引] = true
+                // visited_bool[idx] = true; // visited[映射后的新元素索引] = true
+
+                workspace.visited_marks[idx] = workspace.visited_epoch;
+
 
                 // 看这个邻居值不值得进入候选池 / 结果池。
-                worst_result_id = self
-                    .get_heap_extreme_refer_alive_set(&result_set, &mut result_heap, HeapAccessMode::PeekPruned)
+                worst_result_id = Self::get_heap_extreme_refer_alive_set(&result_set, &mut workspace.result_heap, HeapAccessMode::PeekPruned)
                     .expect("worst_result_id不存在");
-                let neighbor_similarity =
-                    self.get_similarity(id_similarity_cache, &neighbor_id, query);
-                let worst_result_similarity =
-                    self.get_similarity(id_similarity_cache, &worst_result_id, query);
+                let neighbor_similarity = Self::get_similarity_from_parts(
+                    nodes,
+                    id_to_index,
+                    metric,
+                    id_similarity_cache,
+                    &neighbor_id,
+                    query,
+                );
+                let worst_result_similarity = Self::get_similarity_from_parts(
+                    nodes,
+                    id_to_index,
+                    metric,
+                    id_similarity_cache,
+                    &worst_result_id,
+                    query,
+                );
 
                 if neighbor_similarity >= worst_result_similarity || result_set.len() < ef {
 
-                    candidate_alive[self.id_to_index[&neighbor_id]] = true;
+                    workspace.candidate_alive[id_to_index[&neighbor_id]] = true;
                     candidate_alive_num += 1;
 
 
-                    candidate_heap.push((
+                    workspace.candidate_heap.push((
                         ordered_float::NotNan::new(neighbor_similarity).unwrap(),
                         neighbor_id,
                     ));
                     result_set.insert(neighbor_id);
-                    result_heap.push((
+                    workspace.result_heap.push((
                         std::cmp::Reverse(ordered_float::NotNan::new(neighbor_similarity).unwrap()),
                         neighbor_id,
                     ));
                     if result_set.len() > ef {
                         // 超过 ef 后，踢掉结果池里最差的点。
-                        if let Some(id_to_remove) = self.get_heap_extreme_refer_alive_set(
+                        if let Some(id_to_remove) = Self::get_heap_extreme_refer_alive_set(
                             &result_set,
-                            &mut result_heap,
+                            &mut workspace.result_heap,
                             HeapAccessMode::PeekPruned,
                         ) {
                             result_set.remove(&id_to_remove);
@@ -442,7 +518,7 @@ impl HnswIndex {
         }
     }
 
-    pub fn search_knn(&self, query: &Vector, k: usize, ef_search: usize) -> Vec<Id> {
+    pub fn search_knn(&mut self, query: &Vector, k: usize, ef_search: usize) -> Vec<Id> {
         let Some(mut current_entry_id) = self.entry_node_id else {
             return Vec::new();
         };

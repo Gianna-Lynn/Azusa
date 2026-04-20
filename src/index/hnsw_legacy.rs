@@ -18,37 +18,46 @@ impl HnswIndex {
         k: usize,
         ef_search: usize,
     ) -> Vec<Id> {
-        let Some(mut current_entry_id) = entrance_id else {
+        let Some(entry_id) = entrance_id else {
             return Vec::new();
         };
+        let mut current_entry_index = self
+            .get_index_by_id(entry_id)
+            .expect("in search_knn_from_entry_for_legacy, failed to map entrance_id to index");
 
-        let current_node = self.get_node_by_id(current_entry_id).expect(
-            "in search_knn_from_entry_for_legacy, failed to get id with current_entry_id",
+        let current_node = self.get_node_by_index(current_entry_index).expect(
+            "in search_knn_from_entry_for_legacy, failed to get node with current_entry_index",
         );
         for lvl in (1..=*current_node.get_node_max_level()).rev() {
-            current_entry_id = self.greedy_search_at_level(query, current_entry_id, lvl);
+            current_entry_index = self.greedy_search_at_level(query, current_entry_index, lvl);
         }
 
-        let mut id_similarity_cache: HashMap<Id, f32> = HashMap::new();
+        let mut index_similarity_cache: HashMap<usize, f32> = HashMap::new();
         let (candidate_set, _) = self.search_layer(
             query,
-            current_entry_id,
+            current_entry_index,
             0,
             ef_search,
-            &mut id_similarity_cache,
+            &mut index_similarity_cache,
         );
 
-        let mut candidate_sequence: Vec<Id> = candidate_set.into_iter().collect();
-        candidate_sequence.sort_by(|id1, id2| {
-            let score1 = self.get_similarity(&mut id_similarity_cache, id1, query);
-            let score2 = self.get_similarity(&mut id_similarity_cache, id2, query);
+        let mut candidate_sequence: Vec<usize> = candidate_set.into_iter().collect();
+        candidate_sequence.sort_by(|idx1, idx2| {
+            let score1 = self.get_similarity(&mut index_similarity_cache, *idx1, query);
+            let score2 = self.get_similarity(&mut index_similarity_cache, *idx2, query);
             match score2.partial_cmp(&score1).unwrap() {
-                std::cmp::Ordering::Equal => id1.cmp(id2),
+                std::cmp::Ordering::Equal => {
+                    self.get_id_by_index(*idx1).cmp(&self.get_id_by_index(*idx2))
+                }
                 other => other,
             }
         });
 
-        candidate_sequence.into_iter().take(k).collect()
+        candidate_sequence
+            .into_iter()
+            .take(k)
+            .map(|idx| self.get_id_by_index(idx))
+            .collect()
     }
 
     // 仅用于旧路径 / 兼容测试。
@@ -66,25 +75,27 @@ impl HnswIndex {
         let new_node_level = *level;
         let data_copy = data.clone();
         let new_node = HnswNode::new(id, data_copy, new_node_level);
-        let mut id_similarity_cache: HashMap<Id, f32> = HashMap::new();
+        let mut index_similarity_cache: HashMap<usize, f32> = HashMap::new();
+        let new_index = self.nodes.len();
 
         if self.is_empty() {
-            self.entry_node_id = Some(id);
+            self.entry_node_index = Some(new_index);
             self.index_max_level = new_node_level;
-            self.id_to_index.insert(id, self.nodes.len());
+            self.id_to_index.insert(id, new_index);
             self.nodes.push(new_node);
             return;
         }
 
-        self.id_to_index.insert(id, self.nodes.len());
+        self.id_to_index.insert(id, new_index);
         self.nodes.push(new_node);
 
-        let mut entry_point_id = self
-            .get_entry_node_id()
-            .expect("in insert, entry_node_id is none");
+        let mut entry_point_index = self
+            .entry_node_index
+            .expect("in insert, entry_node_index is none");
         if self.index_max_level >= new_node_level + 1 {
             for current_level in (new_node_level + 1..=self.index_max_level).rev() {
-                entry_point_id = self.greedy_search_at_level(&data, entry_point_id, current_level);
+                entry_point_index =
+                    self.greedy_search_at_level(&data, entry_point_index, current_level);
             }
         }
 
@@ -93,10 +104,10 @@ impl HnswIndex {
             let t = Instant::now();
             let (result_set, sl_stats) = self.search_layer(
                 &data,
-                entry_point_id,
+                entry_point_index,
                 current_lvl,
                 ef_construction,
-                &mut id_similarity_cache,
+                &mut index_similarity_cache,
             );
             self.timing.search_layer_ns += t.elapsed().as_nanos();
             self.timing.search_layer_compute_sim_ns += sl_stats.compute_sim_ns;
@@ -106,23 +117,22 @@ impl HnswIndex {
             self.timing.search_layer_bookkeeping_ns += sl_stats.candidate_bookkeeping_ns;
             self.timing.search_layer_loop_iterations += sl_stats.loop_iterations;
 
-            let neighbors_set =
-                self.select_neighbors_simple(
-                    &result_set,
-                    &data,
-                    max_neighbors_to_select,
-                    &mut id_similarity_cache,
-                );
-            for neighbor_node_id in &neighbors_set {
-                self.add_neighbor_to_node_at_level(id, *neighbor_node_id, current_lvl);
-                self.add_neighbor_to_node_at_level(*neighbor_node_id, id, current_lvl);
+            let neighbors_set = self.select_neighbors_simple(
+                &result_set,
+                &data,
+                max_neighbors_to_select,
+                &mut index_similarity_cache,
+            );
+            for &neighbor_index in &neighbors_set {
+                self.add_neighbor_to_node_at_level_by_index(new_index, neighbor_index, current_lvl);
+                self.add_neighbor_to_node_at_level_by_index(neighbor_index, new_index, current_lvl);
             }
 
-            for e_id in &neighbors_set {
-                let e_conn_set: HashSet<Id> = {
+            for &neighbor_index in &neighbors_set {
+                let e_conn_set: HashSet<usize> = {
                     let e_node = self
-                        .get_node_by_id(*e_id)
-                        .expect("in insert, get_node_by_id cannot handle e_id");
+                        .get_node_by_index(neighbor_index)
+                        .expect("in insert, get_node_by_index cannot handle neighbor_index");
                     e_node.get_neighbors()[current_lvl]
                         .iter()
                         .copied()
@@ -130,11 +140,11 @@ impl HnswIndex {
                 };
 
                 if e_conn_set.len() > max_neighbors_to_keep {
-                    let e_new_conn_vec: Vec<Id> = {
+                    let e_new_conn_vec: Vec<usize> = {
                         let e_node = self
-                            .get_node_by_id(*e_id)
-                            .expect("in insert, get_node_by_id cannot handle e_id");
-                        let mut e_cache: HashMap<Id, f32> = HashMap::new();
+                            .get_node_by_index(neighbor_index)
+                            .expect("in insert, get_node_by_index cannot handle neighbor_index");
+                        let mut e_cache: HashMap<usize, f32> = HashMap::new();
                         self.select_neighbors_simple(
                             &e_conn_set,
                             e_node.get_data(),
@@ -144,30 +154,30 @@ impl HnswIndex {
                     };
 
                     let e_node = self
-                        .get_mut_node_by_id(*e_id)
-                        .expect("in insert, get_node_by_id cannot handle e_id");
+                        .get_mut_node_by_index(neighbor_index)
+                        .expect("in insert, get_mut_node_by_index cannot handle neighbor_index");
                     let old_neighbors = e_node.neighbors[current_lvl].clone();
-                    let old_set: HashSet<Id> = old_neighbors.iter().cloned().collect();
-                    let new_set: HashSet<Id> = e_new_conn_vec.iter().cloned().collect();
-                    let to_delete: HashSet<Id> = old_set.difference(&new_set).cloned().collect();
+                    let old_set: HashSet<usize> = old_neighbors.iter().cloned().collect();
+                    let new_set: HashSet<usize> = e_new_conn_vec.iter().cloned().collect();
+                    let to_delete: HashSet<usize> = old_set.difference(&new_set).cloned().collect();
                     e_node.neighbors[current_lvl] = e_new_conn_vec;
-                    for neighbor_to_delete_id in to_delete {
-                        self.delete_neighbor_relationship_at_level(
-                            *e_id,
-                            neighbor_to_delete_id,
-                            current_lvl,
+                    for neighbor_to_delete_index in to_delete {
+                        self.delete_neighbor_relationship_by_index(
+                            neighbor_index,
+                            neighbor_to_delete_index,
+                            Some(current_lvl),
                         );
                     }
                 }
             }
 
-            entry_point_id = self
-                .get_nearest(&mut id_similarity_cache, &result_set, &data)
-                .expect("searchh_result_id赋值错误");
+            entry_point_index = self
+                .get_nearest(&mut index_similarity_cache, &result_set, &data)
+                .expect("search_result_index赋值错误");
         }
 
         if new_node_level > self.index_max_level {
-            self.entry_node_id = Some(id);
+            self.entry_node_index = Some(new_index);
             self.index_max_level = new_node_level;
         }
     }

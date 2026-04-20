@@ -24,8 +24,8 @@ pub struct SearchLayerWorkspace {
     pub visited_epoch: u32,
     pub visited_marks: Vec<u32>, //代替visited_bool, 内含epoch轮次数, 若visited_marks[i] == epoch 表示 第i个点最后一次被访问是在第 #epoch个轮次.
     pub candidate_alive: Vec<bool>,
-    pub candidate_heap: std::collections::BinaryHeap<(ordered_float::NotNan<f32>, Id)> ,
-    pub result_heap: std::collections::BinaryHeap<(std::cmp::Reverse<ordered_float::NotNan<f32>>, Id)>,
+    pub candidate_heap: std::collections::BinaryHeap<(ordered_float::NotNan<f32>, usize)> ,
+    pub result_heap: std::collections::BinaryHeap<(std::cmp::Reverse<ordered_float::NotNan<f32>>, usize)>,
 }
 
 impl SearchLayerWorkspace{
@@ -33,8 +33,8 @@ impl SearchLayerWorkspace{
         let visited_epoch: u32 = 0;
         let visited_marks: Vec<u32> = Vec::new();
         let candidate_alive: Vec<bool> = Vec::new();
-        let candidate_heap: std::collections::BinaryHeap<(ordered_float::NotNan<f32>, Id)> = std::collections::BinaryHeap::new();
-        let result_heap: std::collections::BinaryHeap<(std::cmp::Reverse<ordered_float::NotNan<f32>>, Id)> = std::collections::BinaryHeap::new();
+        let candidate_heap: std::collections::BinaryHeap<(ordered_float::NotNan<f32>, usize)> = std::collections::BinaryHeap::new();
+        let result_heap: std::collections::BinaryHeap<(std::cmp::Reverse<ordered_float::NotNan<f32>>, usize)> = std::collections::BinaryHeap::new();
 
         Self { 
             visited_epoch,
@@ -66,7 +66,7 @@ impl SearchLayerWorkspace{
 #[derive(Debug)]
 pub struct HnswIndex {
     nodes: Vec<HnswNode>,
-    entry_node_id: Option<Id>,
+    entry_node_index: Option<usize>,
     index_max_level: usize,
     metric: Metric,
     id_to_index: HashMap<Id, usize>,

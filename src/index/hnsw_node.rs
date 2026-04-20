@@ -5,7 +5,7 @@ pub struct HnswNode {
     pub(crate) id: Id,
     pub(crate) data: Vector,
     pub(crate) node_max_level: usize,
-    pub(crate) neighbors: Vec<Vec<Id>>,
+    pub(crate) neighbors: Vec<Vec<usize>>,
 }
 
 impl HnswNode {
@@ -35,23 +35,23 @@ impl HnswNode {
         &self.node_max_level
     }
 
-    pub fn get_neighbors(&self) -> &Vec<Vec<u64>> {
+    pub fn get_neighbors(&self) -> &Vec<Vec<usize>> {
         &self.neighbors
     }
 
-    pub fn add_neighbor(&mut self, neighbor_id: Id, level_to_add: usize) {
+    pub fn add_neighbor(&mut self, neighbor_index: usize, level_to_add: usize) {
         if level_to_add < self.neighbors.len() {
-            self.neighbors[level_to_add].push(neighbor_id);
+            self.neighbors[level_to_add].push(neighbor_index);
         }
     }
 
-    pub fn delete_neighbor_single_direction_at_all_levels(&mut self, neighbor_id: Id) {
+    pub fn delete_neighbor_single_direction_at_all_levels(&mut self, neighbor_index: usize) {
         for i in 0..=self.node_max_level {
-            self.neighbors[i].retain(|&id| id != neighbor_id);
+            self.neighbors[i].retain(|&idx| idx != neighbor_index);
         }
     }
 
-    pub fn delete_neighbor_single_direction_at_level(&mut self, neighbor_id: Id, level: usize) {
-        self.neighbors[level].retain(|&id| id != neighbor_id);
+    pub fn delete_neighbor_single_direction_at_level(&mut self, neighbor_index: usize, level: usize) {
+        self.neighbors[level].retain(|&idx| idx != neighbor_index);
     }
 }

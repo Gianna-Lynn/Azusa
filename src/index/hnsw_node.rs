@@ -51,7 +51,11 @@ impl HnswNode {
         }
     }
 
-    pub fn delete_neighbor_single_direction_at_level(&mut self, neighbor_index: usize, level: usize) {
+    pub fn delete_neighbor_single_direction_at_level(
+        &mut self,
+        neighbor_index: usize,
+        level: usize,
+    ) {
         self.neighbors[level].retain(|&idx| idx != neighbor_index);
     }
 }

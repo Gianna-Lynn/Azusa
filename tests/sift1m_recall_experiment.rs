@@ -12,10 +12,10 @@
 
 #[path = "sift1m_test_utils.rs"]
 mod sift1m_test_utils;
-use std::collections::HashSet;
-use std::time::{Duration, Instant};
 use crate::sift1m_test_utils::*;
 use azusa::{distance::similarity, index::hnsw::HnswIndex, types::Metric};
+use std::collections::HashSet;
+use std::time::{Duration, Instant};
 const TEST_METRIC: Metric = Metric::L2;
 
 // base_limit   控制了我们从sift1m的文件里, 只读前多少条向量.

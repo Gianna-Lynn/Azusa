@@ -33,21 +33,16 @@ impl HnswIndex {
         }
 
         let mut index_similarity_cache: HashMap<usize, f32> = HashMap::new();
-        let (candidate_set, _) = self.search_layer(
-            query,
-            current_entry_index,
-            0,
-            ef_search,
-        );
+        let (candidate_set, _) = self.search_layer(query, current_entry_index, 0, ef_search);
 
         let mut candidate_sequence: Vec<usize> = candidate_set.into_iter().collect();
         candidate_sequence.sort_by(|idx1, idx2| {
             let score1 = self.get_similarity(&mut index_similarity_cache, *idx1, query);
             let score2 = self.get_similarity(&mut index_similarity_cache, *idx2, query);
             match score2.partial_cmp(&score1).unwrap() {
-                std::cmp::Ordering::Equal => {
-                    self.get_id_by_index(*idx1).cmp(&self.get_id_by_index(*idx2))
-                }
+                std::cmp::Ordering::Equal => self
+                    .get_id_by_index(*idx1)
+                    .cmp(&self.get_id_by_index(*idx2)),
                 other => other,
             }
         });
@@ -100,12 +95,8 @@ impl HnswIndex {
         let min_level = std::cmp::min(self.index_max_level, new_node_level);
         for current_lvl in (0..=min_level).rev() {
             let t = Instant::now();
-            let (result_set, sl_stats) = self.search_layer(
-                &data,
-                entry_point_index,
-                current_lvl,
-                ef_construction,
-            );
+            let (result_set, sl_stats) =
+                self.search_layer(&data, entry_point_index, current_lvl, ef_construction);
             self.timing.search_layer_ns += t.elapsed().as_nanos();
             self.timing.search_layer_compute_sim_ns += sl_stats.compute_sim_ns;
             self.timing.search_layer_furthest_scan_ns += sl_stats.furthest_scan_ns;
@@ -114,11 +105,8 @@ impl HnswIndex {
             self.timing.search_layer_bookkeeping_ns += sl_stats.candidate_bookkeeping_ns;
             self.timing.search_layer_loop_iterations += sl_stats.loop_iterations;
 
-            let neighbors_set = self.select_neighbors_simple(
-                &result_set,
-                &data,
-                max_neighbors_to_select,
-            );
+            let neighbors_set =
+                self.select_neighbors_simple(&result_set, &data, max_neighbors_to_select);
             for &neighbor_index in &neighbors_set {
                 self.add_neighbor_to_node_at_level_by_index(new_index, neighbor_index, current_lvl);
                 self.add_neighbor_to_node_at_level_by_index(neighbor_index, new_index, current_lvl);
@@ -144,11 +132,7 @@ impl HnswIndex {
                     };
 
                     let e_new_conn_vec: Vec<usize> = {
-                        self.select_neighbors_simple(
-                            &e_conn_set,
-                            &e_data,
-                            max_neighbors_to_keep,
-                        )
+                        self.select_neighbors_simple(&e_conn_set, &e_data, max_neighbors_to_keep)
                     };
 
                     let e_node = self

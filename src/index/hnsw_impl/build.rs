@@ -1,9 +1,13 @@
+use std::cmp::Reverse;
 use std::collections::HashSet;
 use std::time::Instant;
 
 use rand::Rng;
 
-use crate::types::{Id, Metric, Vector};
+use crate::{
+    distance,
+    types::{Id, Metric, Vector},
+};
 
 use super::super::{HnswIndex, HnswNode, SearchLayerWorkspace};
 
@@ -69,8 +73,12 @@ impl HnswIndex {
             self.timing.search_layer_loop_iterations += sl_stats.loop_iterations;
 
             let t = Instant::now();
-            let selected_neighbors =
-                self.select_neighbors_simple(&search_results, &data, max_neighbors_to_select);
+            let selected_neighbors = self.select_neighbors_heuristic(
+                &search_results,
+                &data,
+                max_neighbors_to_select,
+                current_lvl,
+            );
             self.timing.select_neighbors_ns += t.elapsed().as_nanos();
 
             let t = Instant::now();
@@ -164,6 +172,26 @@ impl HnswIndex {
         )
     }
 
+    pub fn select_neighbors_heuristic(
+        &mut self,
+        candidate_set: &HashSet<usize>,
+        query: &Vector,
+        max_neighbors_to_select: usize,
+        level: usize,
+    ) -> Vec<usize> {
+        Self::select_neighbors_heuristic_from_parts(
+            &self.nodes,
+            self.metric,
+            &mut self.workspace,
+            candidate_set,
+            query,
+            max_neighbors_to_select,
+            level,
+            false,
+            true,
+        )
+    }
+
     fn select_neighbors_simple_from_parts(
         nodes: &[HnswNode],
         metric: Metric,
@@ -199,5 +227,81 @@ impl HnswIndex {
             .take(take_count)
             .map(|(index, _)| *index)
             .collect()
+    }
+
+    fn select_neighbors_heuristic_from_parts(
+        nodes: &[HnswNode],
+        metric: Metric,
+        workspace: &mut SearchLayerWorkspace,
+        candidate_set: &HashSet<usize>, // 一个index的集合.
+        query: &Vector,                 // q
+        max_neighbors_to_select: usize, //m :number of neighbors to return
+        level: usize,
+        _extend_candidates: bool,
+        keep_pruned_connections: bool,
+    ) -> Vec<usize> {
+        workspace.reset_select_neighbor_workspace(nodes.len());
+        workspace.reset_similarity_cache(nodes.len());
+
+        for candidate_index in candidate_set.iter().copied() {
+            if nodes[candidate_index].get_neighbors().len() <= level {
+                continue;
+            }
+            let candidate_similarity = HnswIndex::get_similarity_from_workspace(
+                nodes,
+                metric,
+                workspace,
+                candidate_index,
+                query,
+            );
+            workspace.work_heap.push((
+                ordered_float::NotNan::new(candidate_similarity).unwrap(),
+                Reverse(candidate_index),
+            ));
+        }
+
+        let mut result_vec: Vec<(usize, f32)> = vec![]; // R
+        while workspace.work_heap.len() > 0 && result_vec.len() < max_neighbors_to_select {
+            let nearest_elem_in_work = workspace.work_heap.pop().unwrap();
+            // <相似度 ,index>
+            let similarity_e_to_q = nearest_elem_in_work.0.into_inner();
+            let e_index = nearest_elem_in_work.1 .0;
+            let mut flag = true;
+
+            for item in result_vec.iter() {
+                let r_index = item.0;
+                let similarity_e_to_r = distance::similarity(
+                    nodes[e_index].get_data(),
+                    nodes[r_index].get_data(),
+                    metric,
+                );
+                if similarity_e_to_q <= similarity_e_to_r {
+                    flag = false;
+                    break;
+                }
+            }
+            if flag == true {
+                result_vec.push((e_index, similarity_e_to_q));
+            } else {
+                workspace.discard_heap.push((
+                    ordered_float::NotNan::new(similarity_e_to_q).unwrap(),
+                    Reverse(e_index),
+                ));
+            }
+        }
+
+        if keep_pruned_connections {
+            while workspace.discard_heap.len() > 0 && result_vec.len() < max_neighbors_to_select {
+                let discard_top = workspace.discard_heap.pop().unwrap(); //while保证不会panic
+                let discard_top_similarity = discard_top.0.into_inner();
+                let discard_top_index = discard_top.1 .0;
+                result_vec.push((discard_top_index, discard_top_similarity))
+            }
+        }
+        let result_index_vec = result_vec
+            .iter()
+            .map(|(result_index, _)| *result_index)
+            .collect();
+        result_index_vec
     }
 }

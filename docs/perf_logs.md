@@ -5,8 +5,11 @@
 
 ## Overview
 
+Benchmark config: release, base_limit=100000, query_limit=100, k=5, ef_construction=80, m=4, m_max=8, metric=L2
+
 | version | change | build_index | search_layer | ef=100 avg | ef=300 avg | recall@5 / exact@5 |
 | --- | --- | ---: | ---: | ---: | ---: | --- |
+| 2026-04-21 | 相似度缓存改为 workspace epoch 数组并修复 query 边界 | 20.5939304s | 14.31s | 255.632us | 629.796us | 79.6% / 47%, 90.6% / 70% |
 | 2026-04-20 | 图内部从 `Id` 驱动改为 `index` 驱动 | 19.8201135s | 15.56s | 241.834us | 575.874us | 79.6% / 47%, 90.6% / 70% |
 | 2026-04-20 | 去掉 `result_set` 热路径维护 | 27.9259546s | 22.96s | 281.949us | 719.258us | 79.6% / 47%, 90.6% / 70% |
 | 2026-04-20 | 去掉邻居 `to_vec()` 复制 | 30.2196078s | 25.37s | 279.301us | 711.145us | 79.6% / 47%, 90.6% / 70% |
@@ -16,7 +19,7 @@
 
 - `build_index` 和 `search_layer` 越低越好。
 - 查询侧只摘了 `ef_search=100` 和 `300` 两档，分别代表中档与高档搜索开销。
-- 当前留档版本里，`Id -> index` 内部重构这一版整体最好，且 `recall@5` / `exact@5` 没有回退。
+- 当前留档版本里，2026-04-21 的 workspace 相似度缓存版本让 `search_layer` 插入耗时最低，且 `recall@5` / `exact@5` 已恢复到 `Id -> index` 内部重构版本同一水平。
 
 ## 2026-04-18
 
@@ -230,3 +233,51 @@ Experiment: `SIFT1M recall sweep after switching graph internals from Id to inde
 - `search_layer` 插入耗时从 `22.96s` 降到 `15.56s`, 约快 `32.2%`, 说明 `Id -> index` 哈希映射确实是热路径里的大常数项。
 - 查询侧在各档 `ef_search` 下也同步受益, 例如 `ef_search=300` 时平均查询耗时从 `719.258us` 降到 `575.874us`, 约快 `19.9%`。
 - `recall@5` 与 `exact@5` 在各档 `ef_search` 下保持不变, 说明这次重构只改变内部表示, 没有改变搜索语义。
+
+## 2026-04-21
+
+Experiment: `SIFT1M recall sweep after switching similarity cache to workspace epoch arrays and fixing query boundaries`
+
+- base_limit: `100000`
+- k: `5`
+- query_limit: `100`
+- ef_construction: `80`
+- m: `4`
+- m_max: `8`
+- metric: `L2`
+- command: `cargo test --release test_hnsw_in_sift1m -- --nocapture`
+- change: `SearchLayerWorkspace` 增加 `sim_epoch` / `sim_marks` / `sim_values`, `search_layer` / `greedy_search_at_level` / `select_neighbors_simple` / `get_nearest` 改用 workspace 数组缓存相似度, 并在不同 query 入口调用 `reset_similarity_cache` 隔离缓存 epoch
+
+### Build Summary
+
+| item | value |
+| --- | ---: |
+| build_index time | 20.5939304s |
+| ground truth time | 1.3509758s |
+| insert count | 100000 |
+
+### Insert Timings
+
+| phase | time | share |
+| --- | ---: | ---: |
+| greedy_search | 1.39s | 7.4% |
+| search_layer | 14.31s | 76.0% |
+
+### Query Results
+
+| ef_search | total_search_time | avg_search_time | recall@5 | exact@5 |
+| --------: | ----------------: | --------------: | -------: | ------: |
+|        60 |          14.0727ms |         140.727us |    72.8% |     35% |
+|        80 |          19.2201ms |         192.201us |    77.0% |     44% |
+|       100 |          25.5632ms |         255.632us |    79.6% |     47% |
+|       150 |          37.4485ms |         374.485us |    83.2% |     52% |
+|       200 |          40.6331ms |         406.331us |    86.8% |     60% |
+|       300 |          62.9796ms |         629.796us |    90.6% |     70% |
+
+### Notes
+
+- 这版用于记录“相似度缓存从 `HashMap<usize, f32>` 改为 workspace epoch 数组, 并修复不同 query 间 epoch 隔离”后的性能结果。
+- 和上一版“图内部从 `Id` 驱动改为 `index` 驱动”相比, 建图时间从 `19.8201135s` 到 `20.5939304s`, 约慢 `3.9%`, 可能包含本次运行波动和更保守的 query 边界 reset 成本。
+- `search_layer` 插入耗时从 `15.56s` 降到 `14.31s`, 约快 `8.0%`; 这是本次改动最稳定的正向信号。
+- 查询侧 `ef_search=100` 从 `241.834us` 升到 `255.632us`, 约慢 `5.7%`; `ef_search=300` 从 `575.874us` 升到 `629.796us`, 约慢 `9.4%`, 说明保守 reset 后查询侧没有稳定收益。
+- `recall@5` 与 `exact@5` 在各档 `ef_search` 下恢复到上一版同一水平, 说明此前未隔离 query epoch 导致的语义回退已经修复。

@@ -38,7 +38,6 @@ impl HnswIndex {
             current_entry_index,
             0,
             ef_search,
-            &mut index_similarity_cache,
         );
 
         let mut candidate_sequence: Vec<usize> = candidate_set.into_iter().collect();
@@ -75,7 +74,6 @@ impl HnswIndex {
         let new_node_level = *level;
         let data_copy = data.clone();
         let new_node = HnswNode::new(id, data_copy, new_node_level);
-        let mut index_similarity_cache: HashMap<usize, f32> = HashMap::new();
         let new_index = self.nodes.len();
 
         if self.is_empty() {
@@ -107,7 +105,6 @@ impl HnswIndex {
                 entry_point_index,
                 current_lvl,
                 ef_construction,
-                &mut index_similarity_cache,
             );
             self.timing.search_layer_ns += t.elapsed().as_nanos();
             self.timing.search_layer_compute_sim_ns += sl_stats.compute_sim_ns;
@@ -121,7 +118,6 @@ impl HnswIndex {
                 &result_set,
                 &data,
                 max_neighbors_to_select,
-                &mut index_similarity_cache,
             );
             for &neighbor_index in &neighbors_set {
                 self.add_neighbor_to_node_at_level_by_index(new_index, neighbor_index, current_lvl);
@@ -140,16 +136,18 @@ impl HnswIndex {
                 };
 
                 if e_conn_set.len() > max_neighbors_to_keep {
-                    let e_new_conn_vec: Vec<usize> = {
+                    let e_data = {
                         let e_node = self
                             .get_node_by_index(neighbor_index)
                             .expect("in insert, get_node_by_index cannot handle neighbor_index");
-                        let mut e_cache: HashMap<usize, f32> = HashMap::new();
+                        e_node.get_data().clone()
+                    };
+
+                    let e_new_conn_vec: Vec<usize> = {
                         self.select_neighbors_simple(
                             &e_conn_set,
-                            e_node.get_data(),
+                            &e_data,
                             max_neighbors_to_keep,
-                            &mut e_cache,
                         )
                     };
 
@@ -172,7 +170,7 @@ impl HnswIndex {
             }
 
             entry_point_index = self
-                .get_nearest(&mut index_similarity_cache, &result_set, &data)
+                .get_nearest(&result_set, &data)
                 .expect("search_result_index赋值错误");
         }
 

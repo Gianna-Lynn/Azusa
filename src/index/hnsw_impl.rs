@@ -207,16 +207,17 @@ impl HnswIndex {
     }
 
     pub(super) fn get_nearest(
-        &self,
-        index_similarity_cache: &mut HashMap<usize, f32>,
+        &mut self,
         set: &HashSet<usize>,
         query: &Vector,
     ) -> Option<usize> {
+        self.workspace.reset_similarity_cache(self.nodes.len());
+
         let mut max_similarity = f32::NEG_INFINITY;
         let mut max_elem_index: Option<usize> = None;
 
         for elem_index in set {
-            let temp_similarity = self.get_similarity(index_similarity_cache, *elem_index, query);
+            let temp_similarity = HnswIndex::get_similarity_from_workspace(&self.nodes, self.metric, &mut self.workspace, *elem_index, query);
             if temp_similarity > max_similarity {
                 max_similarity = temp_similarity;
                 max_elem_index = Some(*elem_index);
@@ -244,18 +245,21 @@ impl HnswIndex {
         }
     }
 
-    fn get_similarity_from_parts(
+    // 这个函数的设计初衷是为了在search_layer中替换掉get_similarity_from_parts, 
+    // 以利用SearchLayerWorkspace中的sim_marks和sim_values来缓存相似度计算结果, 避免重复计算.
+    fn get_similarity_from_workspace(
         nodes: &[HnswNode],
         metric: Metric,
-        index_similarity_cache: &mut HashMap<usize, f32>,
+        workspace: &mut SearchLayerWorkspace,
         target_index: usize,
         query: &Vector,
     ) -> f32 {
-        if let Some(similarity) = index_similarity_cache.get(&target_index) {
-            *similarity
+        if workspace.sim_marks[target_index] == workspace.sim_epoch {
+            workspace.sim_values[target_index]
         } else {
             let new_similarity = distance::similarity(nodes[target_index].get_data(), query, metric);
-            index_similarity_cache.insert(target_index, new_similarity);
+            workspace.sim_marks[target_index] = workspace.sim_epoch;
+            workspace.sim_values[target_index] = new_similarity;
             new_similarity
         }
     }
@@ -298,7 +302,6 @@ impl HnswIndex {
         entry_index: usize,
         level: usize,
         ef: usize,
-        index_similarity_cache: &mut HashMap<usize, f32>,
     ) -> (HashSet<usize>, SearchLayerStats) {
         assert!(ef >= 1, "ef至少为1");
 
@@ -314,10 +317,10 @@ impl HnswIndex {
         workspace.candidate_alive[entry_index] = true;
         candidate_alive_num += 1;
 
-        let entry_similarity = Self::get_similarity_from_parts(
+        let entry_similarity = Self::get_similarity_from_workspace(
             nodes,
             metric,
-            index_similarity_cache,
+            workspace,
             entry_index,
             query,
         );
@@ -348,10 +351,10 @@ impl HnswIndex {
                 .map(|(reverse_score, _)| reverse_score.0.into_inner())
                 .expect("result_heap shouldn't be empty");
 
-            let current_candidate_similarity = Self::get_similarity_from_parts(
+            let current_candidate_similarity = Self::get_similarity_from_workspace(
                 nodes,
                 metric,
-                index_similarity_cache,
+                workspace,
                 current_candidate_index,
                 query,
             );
@@ -369,10 +372,10 @@ impl HnswIndex {
 
                 workspace.visited_marks[neighbor_index] = workspace.visited_epoch;
 
-                let neighbor_similarity = Self::get_similarity_from_parts(
+                let neighbor_similarity = Self::get_similarity_from_workspace(
                     nodes,
                     metric,
-                    index_similarity_cache,
+                    workspace,
                     neighbor_index,
                     query,
                 );
@@ -412,22 +415,25 @@ impl HnswIndex {
         (result_set, stats)
     }
 
-    pub fn greedy_search_at_level(&self, query: &Vector, entry_index: usize, level: usize) -> usize {
-        let mut index_similarity_cache: HashMap<usize, f32> = HashMap::new();
-        let mut current_node_index = entry_index;
+    pub fn greedy_search_at_level(&mut self, query: &Vector, entry_index: usize, level: usize) -> usize {
+        // 把同一个self中的不同字段拆开借用出来, 分别作只读借用, 拷贝, 可变借用, 而且拆开字段后彻底不要回头再碰self.
+        self.workspace.reset_similarity_cache(self.nodes.len());
+        
+        let nodes = &self.nodes;  // 只读借用
+        let metric = self.metric;   // 拷贝
+        let workspace = &mut self.workspace; // 可变借用
+        
+        let mut current_node_index = entry_index;  
         let mut max_similarity =
-            self.get_similarity(&mut index_similarity_cache, current_node_index, query);
+            Self::get_similarity_from_workspace(nodes, metric, workspace, current_node_index, query);
         let mut max_similarity_index = current_node_index;
 
         loop {
-            let current_node = self
-                .get_node_by_index(current_node_index)
-                .expect("未能根据entry_index检索到entry_node");
-            let current_node_neighbors = &current_node.get_neighbors()[level];
+            let current_node_neighbors = &nodes[current_node_index].get_neighbors()[level];
 
             for &neighbor_index in current_node_neighbors {
                 let neighbor_node_similarity =
-                    self.get_similarity(&mut index_similarity_cache, neighbor_index, query);
+                    Self::get_similarity_from_workspace(nodes, metric, workspace, neighbor_index, query);
                 if neighbor_node_similarity > max_similarity {
                     max_similarity = neighbor_node_similarity;
                     max_similarity_index = neighbor_index;
@@ -451,15 +457,14 @@ impl HnswIndex {
             current_entry_index = self.greedy_search_at_level(query, current_entry_index, lvl);
         }
 
-        let mut index_similarity_cache: HashMap<usize, f32> = HashMap::new();
         let (candidate_set, _) = self.search_layer(
             query,
             current_entry_index,
             0,
             ef_search,
-            &mut index_similarity_cache,
         );
 
+        let mut index_similarity_cache: HashMap<usize, f32> = HashMap::new();
         let mut candidate_sequence: Vec<usize> = candidate_set.into_iter().collect();
         candidate_sequence.sort_by(|idx1, idx2| {
             let score1 = self.get_similarity(&mut index_similarity_cache, *idx1, query);
@@ -503,7 +508,6 @@ impl HnswIndex {
         let node_lvl = self.sample_level();
         let data_copy = data.clone();
         let new_node = HnswNode::new(id, data_copy, node_lvl);
-        let mut index_similarity_cache: HashMap<usize, f32> = HashMap::new();
         let new_index = self.nodes.len();
 
         if self.is_empty() {
@@ -538,7 +542,6 @@ impl HnswIndex {
                 entry_point_index,
                 current_lvl,
                 ef_construction,
-                &mut index_similarity_cache,
             );
             self.timing.search_layer_ns += t.elapsed().as_nanos();
             self.timing.search_layer_compute_sim_ns += sl_stats.compute_sim_ns;
@@ -553,7 +556,6 @@ impl HnswIndex {
                 &search_results,
                 &data,
                 max_neighbors_to_select,
-                &mut index_similarity_cache,
             );
             self.timing.select_neighbors_ns += t.elapsed().as_nanos();
 
@@ -577,16 +579,18 @@ impl HnswIndex {
                 };
 
                 if neighbor_current_connections.len() > max_neighbors_to_keep {
-                    let neighbor_pruned_connections: Vec<usize> = {
+                    let neighbor_data = {
                         let neighbor_node = self
                             .get_node_by_index(neighbor_index)
                             .expect("in insert, get_node_by_index cannot handle neighbor_index");
-                        let mut neighbor_similarity_cache: HashMap<usize, f32> = HashMap::new();
+                        neighbor_node.get_data().clone()
+                    };
+
+                    let neighbor_pruned_connections: Vec<usize> = {
                         self.select_neighbors_simple(
                             &neighbor_current_connections,
-                            neighbor_node.get_data(),
+                            &neighbor_data,
                             max_neighbors_to_keep,
-                            &mut neighbor_similarity_cache,
                         )
                     };
 
@@ -619,7 +623,7 @@ impl HnswIndex {
             self.timing.pruning_ns += t.elapsed().as_nanos();
 
             entry_point_index = self
-                .get_nearest(&mut index_similarity_cache, &search_results, &data)
+                .get_nearest(&search_results, &data)
                 .expect("search_result_index赋值错误");
         }
 
@@ -630,18 +634,20 @@ impl HnswIndex {
     }
 
     pub fn select_neighbors_simple(
-        &self,
+        &mut self,
         candidate_set: &HashSet<usize>,
         query: &Vector,
         max_neighbors_to_select: usize,
-        cache: &mut HashMap<usize, f32>,
     ) -> Vec<usize> {
+
+        self.workspace.reset_similarity_cache(self.nodes.len());
+
         let mut index_score_map: Vec<(usize, f32)> = candidate_set
             .iter()
             .map(|candidate_index| {
                 (
                     *candidate_index,
-                    self.get_similarity(cache, *candidate_index, query),
+                    HnswIndex::get_similarity_from_workspace(&self.nodes, self.metric, &mut self.workspace, *candidate_index, query),
                 )
             })
             .collect();

@@ -26,6 +26,10 @@ pub struct SearchLayerWorkspace {
     pub candidate_alive: Vec<bool>,
     pub candidate_heap: std::collections::BinaryHeap<(ordered_float::NotNan<f32>, usize)> ,
     pub result_heap: std::collections::BinaryHeap<(std::cmp::Reverse<ordered_float::NotNan<f32>>, usize)>,
+
+    pub sim_epoch: u32,
+    pub sim_marks: Vec<u32>, //同样的设计, 用于search_layer
+    pub sim_values: Vec<f32>, //缓存相似度计算结果, 避免重复计算
 }
 
 impl SearchLayerWorkspace{
@@ -35,31 +39,54 @@ impl SearchLayerWorkspace{
         let candidate_alive: Vec<bool> = Vec::new();
         let candidate_heap: std::collections::BinaryHeap<(ordered_float::NotNan<f32>, usize)> = std::collections::BinaryHeap::new();
         let result_heap: std::collections::BinaryHeap<(std::cmp::Reverse<ordered_float::NotNan<f32>>, usize)> = std::collections::BinaryHeap::new();
+        let sim_epoch: u32 = 0;
+        let sim_marks: Vec<u32> = Vec::new();
+        let sim_values: Vec<f32> = Vec::new();
+
 
         Self { 
             visited_epoch,
             visited_marks,
             candidate_alive,
             candidate_heap, 
-            result_heap 
+            result_heap,
+            sim_epoch,
+            sim_marks,
+            sim_values,
         }
     }
 
     pub fn reset(&mut self, node_count : usize){
         self.visited_epoch += 1;
 
-        if self.visited_marks.len() < node_count{
+        // resize(new_len, value): 若不够长, 扩容到new_len, 并且扩容的部分初始化value. 
+        // clear(): 将长度置零, 但不改变capacity. 因此在下一轮访问时如果直接访问下标就会越界.
+        if self.visited_marks.len() < node_count{ //只有当节点数增加时才扩容, 避免每轮都resize
             self.visited_marks.resize(node_count, 0);
         }
         if self.candidate_alive.len() < node_count{
             self.candidate_alive.resize(node_count, false);
         }
-        // self.visited_marks.clear();  //clear会把长度置零, 导致下一轮访问下标越界
-        // self.candidate_alive.clear();
         self.candidate_heap.clear();
         self.result_heap.clear();
 
+        self.sim_epoch += 1;
+        if self.sim_marks.len() < node_count{  
+           
+            self.sim_marks.resize(node_count, 0);
+            self.sim_values.resize(node_count, 0.0);
+        }
+
     }
+
+    pub fn reset_similarity_cache(&mut self, node_count: usize) {
+        self.sim_epoch += 1;
+        if self.sim_marks.len() < node_count {
+            self.sim_marks.resize(node_count, 0);
+            self.sim_values.resize(node_count, 0.0);
+        }
+    }
+    
 }
 
 

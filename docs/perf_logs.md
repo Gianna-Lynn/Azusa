@@ -9,6 +9,7 @@ Benchmark config: release, base_limit=100000, query_limit=100, k=5, ef_construct
 
 | version | change | build_index | search_layer | ef=100 avg | ef=300 avg | recall@5 / exact@5 |
 | --- | --- | ---: | ---: | ---: | ---: | --- |
+| 2026-04-21 | 新节点连边接入 heuristic neighbor selection | 25.227798s | 17.91s | 347.366us | 616.848us | 88.8% / 70%, 96.2% / 84% |
 | 2026-04-21 | 相似度缓存改为 workspace epoch 数组并修复 query 边界 | 20.5939304s | 14.31s | 255.632us | 629.796us | 79.6% / 47%, 90.6% / 70% |
 | 2026-04-20 | 图内部从 `Id` 驱动改为 `index` 驱动 | 19.8201135s | 15.56s | 241.834us | 575.874us | 79.6% / 47%, 90.6% / 70% |
 | 2026-04-20 | 去掉 `result_set` 热路径维护 | 27.9259546s | 22.96s | 281.949us | 719.258us | 79.6% / 47%, 90.6% / 70% |
@@ -19,7 +20,7 @@ Benchmark config: release, base_limit=100000, query_limit=100, k=5, ef_construct
 
 - `build_index` 和 `search_layer` 越低越好。
 - 查询侧只摘了 `ef_search=100` 和 `300` 两档，分别代表中档与高档搜索开销。
-- 当前留档版本里，2026-04-21 的 workspace 相似度缓存版本让 `search_layer` 插入耗时最低，且 `recall@5` / `exact@5` 已恢复到 `Id -> index` 内部重构版本同一水平。
+- 当前留档版本里，2026-04-21 的 heuristic neighbor selection 版本显著提高了 `recall@5` / `exact@5`，代价是建图时间和中低档 `ef_search` 查询耗时上升。
 
 ## 2026-04-18
 
@@ -281,3 +282,51 @@ Experiment: `SIFT1M recall sweep after switching similarity cache to workspace e
 - `search_layer` 插入耗时从 `15.56s` 降到 `14.31s`, 约快 `8.0%`; 这是本次改动最稳定的正向信号。
 - 查询侧 `ef_search=100` 从 `241.834us` 升到 `255.632us`, 约慢 `5.7%`; `ef_search=300` 从 `575.874us` 升到 `629.796us`, 约慢 `9.4%`, 说明保守 reset 后查询侧没有稳定收益。
 - `recall@5` 与 `exact@5` 在各档 `ef_search` 下恢复到上一版同一水平, 说明此前未隔离 query epoch 导致的语义回退已经修复。
+
+## 2026-04-21
+
+Experiment: `SIFT1M recall sweep after enabling heuristic neighbor selection for new-node links`
+
+- base_limit: `100000`
+- k: `5`
+- query_limit: `100`
+- ef_construction: `80`
+- m: `4`
+- m_max: `8`
+- metric: `L2`
+- command: `cargo test --release test_hnsw_in_sift1m -- --nocapture`
+- change: 新节点连边从 `select_neighbors_simple` 切到 heuristic neighbor selection, `SearchLayerWorkspace` 托管 `work_heap` / `discard_heap`, heap tie-break 使用 `Reverse<usize>` 保持 index 驱动; 反向边超限裁剪暂时仍走 simple selection
+
+### Build Summary
+
+| item | value |
+| --- | ---: |
+| build_index time | 25.227798s |
+| ground truth time | 1.4356661s |
+| insert count | 100000 |
+
+### Insert Timings
+
+| phase | time | share |
+| --- | ---: | ---: |
+| greedy_search | 1.69s | 7.2% |
+| search_layer | 17.91s | 76.7% |
+
+### Query Results
+
+| ef_search | total_search_time | avg_search_time | recall@5 | exact@5 |
+| --------: | ----------------: | --------------: | -------: | ------: |
+|        60 |          24.62ms |         246.2us |    84.6% |     58% |
+|        80 |        28.3911ms |       283.911us |    87.6% |     66% |
+|       100 |        34.7366ms |       347.366us |    88.8% |     70% |
+|       150 |        51.9618ms |       519.618us |    92.8% |     74% |
+|       200 |        58.3748ms |       583.748us |    94.8% |     78% |
+|       300 |        61.6848ms |       616.848us |    96.2% |     84% |
+
+### Notes
+
+- 和同日 workspace 相似度缓存版本相比, `recall@5` 在各档 `ef_search` 下明显提升, 例如 `ef_search=100` 从 `79.6%` 到 `88.8%`, `ef_search=300` 从 `90.6%` 到 `96.2%`。
+- `exact@5` 同样提升明显, `ef_search=300` 从 `70%` 到 `84%`, 说明 heuristic selection 改善的不只是命中数量, 也改善了 top-5 结果集合的整体质量。
+- 建图时间从 `20.5939304s` 升到 `25.227798s`, 约慢 `22.5%`; `search_layer` 插入耗时从 `14.31s` 升到 `17.91s`, 约慢 `25.2%`。主要原因是 heuristic selection 会额外计算候选 `e` 与已选邻居 `r` 的相似度, 用更多建图成本换取更分散的边。
+- 查询侧中低档 `ef_search` 耗时上升较明显, 如 `ef_search=100` 从 `255.632us` 到 `347.366us`; 高档 `ef_search=300` 与上一版接近, 从 `629.796us` 到 `616.848us`。
+- 当前只替换新节点连边选择, 反向边超限裁剪仍保留 simple selection, 便于单独观察 heuristic new-node links 对图质量和成本的影响。

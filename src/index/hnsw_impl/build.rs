@@ -107,13 +107,16 @@ impl HnswIndex {
                         let workspace = &mut self.workspace;
                         let neighbor_data = nodes[neighbor_index].get_data();
 
-                        Self::select_neighbors_simple_from_parts(
+                        Self::select_neighbors_heuristic_from_parts(
                             nodes,
                             metric,
                             workspace,
                             &neighbor_current_connections,
                             neighbor_data,
                             max_neighbors_to_keep,
+                            current_lvl,
+                            false,
+                            true,
                         )
                     };
 

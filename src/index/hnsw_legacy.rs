@@ -5,7 +5,7 @@ use crate::types::{Id, Vector};
 
 use super::{HnswIndex, HnswNode};
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::time::Instant;
 
 impl HnswIndex {
@@ -32,25 +32,12 @@ impl HnswIndex {
             current_entry_index = self.greedy_search_at_level(query, current_entry_index, lvl);
         }
 
-        let mut index_similarity_cache: HashMap<usize, f32> = HashMap::new();
-        let (candidate_set, _) = self.search_layer(query, current_entry_index, 0, ef_search);
+        let (candidates, _) = self.search_layer(query, current_entry_index, 0, ef_search);
 
-        let mut candidate_sequence: Vec<usize> = candidate_set.into_iter().collect();
-        candidate_sequence.sort_by(|idx1, idx2| {
-            let score1 = self.get_similarity(&mut index_similarity_cache, *idx1, query);
-            let score2 = self.get_similarity(&mut index_similarity_cache, *idx2, query);
-            match score2.partial_cmp(&score1).unwrap() {
-                std::cmp::Ordering::Equal => self
-                    .get_id_by_index(*idx1)
-                    .cmp(&self.get_id_by_index(*idx2)),
-                other => other,
-            }
-        });
-
-        candidate_sequence
+        candidates
             .into_iter()
             .take(k)
-            .map(|idx| self.get_id_by_index(idx))
+            .map(|(idx, _)| self.get_id_by_index(idx))
             .collect()
     }
 
@@ -95,7 +82,7 @@ impl HnswIndex {
         let min_level = std::cmp::min(self.index_max_level, new_node_level);
         for current_lvl in (0..=min_level).rev() {
             let t = Instant::now();
-            let (result_set, sl_stats) =
+            let (search_results, sl_stats) =
                 self.search_layer(&data, entry_point_index, current_lvl, ef_construction);
             self.timing.search_layer_ns += t.elapsed().as_nanos();
             self.timing.search_layer_compute_sim_ns += sl_stats.compute_sim_ns;
@@ -104,6 +91,11 @@ impl HnswIndex {
             self.timing.search_layer_heap_pop_ns += sl_stats.heap_pop_ns;
             self.timing.search_layer_bookkeeping_ns += sl_stats.candidate_bookkeeping_ns;
             self.timing.search_layer_loop_iterations += sl_stats.loop_iterations;
+
+            let result_set: HashSet<usize> = search_results
+                .iter()
+                .map(|(result_index, _)| *result_index)
+                .collect();
 
             let neighbors_set =
                 self.select_neighbors_simple(&result_set, &data, max_neighbors_to_select);
@@ -153,8 +145,9 @@ impl HnswIndex {
                 }
             }
 
-            entry_point_index = self
-                .get_nearest(&result_set, &data)
+            entry_point_index = search_results
+                .first()
+                .map(|(index, _)| *index)
                 .expect("search_result_index赋值错误");
         }
 

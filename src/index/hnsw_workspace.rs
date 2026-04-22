@@ -8,7 +8,16 @@ use ordered_float::NotNan;
 pub struct SearchLayerWorkspace {
     pub visited_epoch: u32,
     pub visited_marks: Vec<u32>, //代替visited_bool, 内含epoch轮次数, 若visited_marks[i] == epoch 表示 第i个点最后一次被访问是在第 #epoch个轮次.
-    pub candidate_heap: BinaryHeap<(NotNan<f32>, usize)>,
+    // 大橘:
+    // Rust的BinaryHeap默认是大根堆, tuple会先比较similarity, similarity相同再比较index.
+    // 如果这里直接用(NotNan<f32>, usize), 同分时会变成index大的候选先出堆.
+    // candidate_heap要表达"similarity大优先, 同分index小优先", 所以把index包成Reverse<usize>.
+    pub candidate_heap: BinaryHeap<(NotNan<f32>, Reverse<usize>)>,
+    // 大橘:
+    // result_heap用于维护固定容量top-ef结果集, 最常用的操作是peek/pop当前最差结果.
+    // 因此只把similarity包成Reverse<NotNan<f32>>, 让堆顶变成"similarity最小/最差"的元素.
+    // 这里不把index包成Reverse<usize>: 维护阶段同分时会先pop掉index大的元素, 保留index小的元素;
+    // search_layer结束后再连续pop并reverse成输出Vec, 最终就是similarity降序且同分index升序.
     pub result_heap: BinaryHeap<(Reverse<NotNan<f32>>, usize)>,
 
     pub sim_epoch: u32,

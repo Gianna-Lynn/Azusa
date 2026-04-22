@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::distance;
 use crate::types::{Metric, Vector};
@@ -8,29 +8,6 @@ use super::super::{HnswIndex, HnswNode, SearchLayerWorkspace};
 impl HnswIndex {
     pub fn compute_similarity(&self, a: &Vector, b: &Vector) -> f32 {
         distance::similarity(a, b, self.metric)
-    }
-
-    pub(crate) fn get_nearest(&mut self, set: &HashSet<usize>, query: &Vector) -> Option<usize> {
-        self.workspace.reset_similarity_cache(self.nodes.len());
-
-        let mut max_similarity = f32::NEG_INFINITY;
-        let mut max_elem_index: Option<usize> = None;
-
-        for elem_index in set {
-            let temp_similarity = HnswIndex::get_similarity_from_workspace(
-                &self.nodes,
-                self.metric,
-                &mut self.workspace,
-                *elem_index,
-                query,
-            );
-            if temp_similarity > max_similarity {
-                max_similarity = temp_similarity;
-                max_elem_index = Some(*elem_index);
-            }
-        }
-
-        max_elem_index
     }
 
     pub fn get_similarity(

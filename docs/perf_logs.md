@@ -3,7 +3,53 @@
 这份文件只记录值得留档的实验汇总结果。
 原始终端输出继续放在 `target/logs/` 下，并保持每次覆盖。
 
-## Overview
+## 2026-04-22
+
+Experiment: `SIFT1M recall sweep on full 1M base with official groundtruth`
+
+- base_limit: `1000000`
+- k: `5`
+- query_limit: `100`
+- ef_construction: `80`
+- m: `4`
+- m_max: `8`
+- metric: `L2`
+- command: `cargo test --release test_hnsw_in_sift1m -- --nocapture`
+- change: 将主测试切到官方 `sift_groundtruth.ivecs` 参考答案，并把 `base_limit` 提升到 `1000000`
+
+### Build Summary
+
+| item | value |
+| --- | ---: |
+| build_index time | 392.8317633s |
+| ground truth time | 1.2822ms |
+| insert count | 1000000 |
+
+### Insert Timings
+
+| phase | time | share |
+| --- | ---: | ---: |
+| greedy_search | 34.18s | 8.8% |
+| search_layer | 327.47s | 83.8% |
+
+### Query Results
+
+| ef_search | total_search_time | avg_search_time | recall@5 | exact@5 |
+| --------: | ----------------: | --------------: | -------: | ------: |
+|        60 |          25.7881ms |         257.881us |    68.2% |     34% |
+|        80 |          26.7733ms |         267.733us |    75.2% |     38% |
+|       100 |          29.9425ms |         299.425us |    78.4% |     41% |
+|       150 |          39.8614ms |         398.614us |    84.0% |     53% |
+|       200 |          48.3276ms |         483.276us |    87.6% |     61% |
+|       300 |          66.9292ms |         669.292us |    91.2% |     68% |
+
+### Notes
+
+- 这是第一份真正基于全量 `1,000,000` base 的官方 groundtruth 结果，可以作为后续全量优化的正式 baseline。
+- 这次 `valid_query_cnt=100`, 说明在全量 base 下官方 groundtruth 的前 `k=5` 都能完整对齐，不再需要跳过 query。
+- 相比 `100000` base 的结果, 查询侧曲线更像真实全量 SIFT1M 的负载形态, 后续调参应优先参考这一版。
+
+## 100k Overview
 
 Benchmark config: release, base_limit=100000, query_limit=100, k=5, ef_construction=80, m=4, m_max=8, metric=L2
 
@@ -17,7 +63,7 @@ Benchmark config: release, base_limit=100000, query_limit=100, k=5, ef_construct
 | 2026-04-20 | 去掉邻居 `to_vec()` 复制 | 30.2196078s | 25.37s | 279.301us | 711.145us | 79.6% / 47%, 90.6% / 70% |
 | 2026-04-19 | 带 timing 的基线版本 | 30.1282601s | 25.39s | 341.943us | 817.277us | 79.6% / 47%, 90.6% / 70% |
 
-### Overview Notes
+### 100k Overview Notes
 
 - `build_index` 和 `search_layer` 越低越好。
 - 查询侧只摘了 `ef_search=100` 和 `300` 两档，分别代表中档与高档搜索开销。

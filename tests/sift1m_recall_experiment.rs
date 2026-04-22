@@ -47,14 +47,22 @@ struct Sift1mExperimentConfig {
     k: usize,
     ef_search: &'static [usize],
     query_limit: usize,
+    reference_source: ReferenceSource,
 }
 
 const SIFT1M_EXPERIMENTS: &[Sift1mExperimentConfig] = &[Sift1mExperimentConfig {
-    base_limit: 100000,
+    base_limit: 1000000,
     k: 5,
     ef_search: &[60, 80, 100, 150, 200, 300],
     query_limit: 100,
+    reference_source: ReferenceSource::OfficialGroundTruth,
 }];
+
+#[derive(Debug, Clone, Copy)]
+enum ReferenceSource {
+    OfficialGroundTruth,
+    BruteForce,
+}
 
 /**************************  测试主体  **************************/
 #[test]
@@ -65,6 +73,13 @@ fn test_hnsw_in_sift1m() {
 }
 
 fn run_sift1m_experiment(config: &Sift1mExperimentConfig) {
+    run_sift1m_experiment_with_reference_source(config, config.reference_source);
+}
+
+fn run_sift1m_experiment_with_reference_source(
+    config: &Sift1mExperimentConfig,
+    reference_source: ReferenceSource,
+) {
     let base_bytes = load_sift_bytes("data//sift1m//sift//sift_base.fvecs")
         .expect("in function run_sift1m_experiment, load base_bytes error");
     let base_vecs = read_fvecs(&base_bytes, config.base_limit);
@@ -82,69 +97,159 @@ fn run_sift1m_experiment(config: &Sift1mExperimentConfig) {
         .expect("in function run_sift1m_experiment, load query_bytes error");
     let query_vecs = read_fvecs(&query_bytes, config.query_limit);
 
-    let mut all_brute_force_ids = Vec::with_capacity(config.query_limit);
-    println!(
-        "Pre-calculating brute-force ground truth for {} queries...",
-        config.query_limit
-    );
-    let brute_force_start = Instant::now();
-    for query_vec in &query_vecs {
-        let brute_force = exact_top_k(&base_vecs, query_vec, config.k, TEST_METRIC);
-        let brute_force_ids: Vec<_> = brute_force.iter().map(|(id, _)| *id).collect();
-        all_brute_force_ids.push(brute_force_ids);
-    }
-    println!(
-        "Ground truth calculation took: {:?}",
-        brute_force_start.elapsed()
+    let reference_top_k_ids = build_reference_top_k_ids(
+        config,
+        &base_vecs,
+        &query_vecs,
+        reference_source,
     );
 
     for &ef_search in config.ef_search {
-        let mut total_recall_at_k: f32 = 0.0;
-        let mut total_exact_at_k = 0;
-        let mut total_search_time = Duration::default();
-        println!(
-            "--- base_limit={}, ef_search={} ---",
-            config.base_limit, ef_search
+        run_sift1m_eval_pass(
+            &mut index,
+            config,
+            &query_vecs,
+            &reference_top_k_ids,
+            ef_search,
         );
-        for (idx, query_vec) in query_vecs.iter().enumerate() {
-            let search_start = Instant::now();
-            let search_result_ids = index.search_knn(query_vec, config.k, ef_search);
-            total_search_time += search_start.elapsed();
-            let brute_force_ids = &all_brute_force_ids[idx];
+    }
+}
 
-            let brute_set: HashSet<_> = brute_force_ids.iter().copied().collect();
-            let overlap_num = search_result_ids
+fn build_reference_top_k_ids(
+    config: &Sift1mExperimentConfig,
+    base_vecs: &[Vec<f32>],
+    query_vecs: &[Vec<f32>],
+    reference_source: ReferenceSource,
+) -> Vec<Option<Vec<u32>>> {
+    match reference_source {
+        ReferenceSource::BruteForce => {
+            println!(
+                "Pre-calculating brute-force ground truth for {} queries...",
+                query_vecs.len()
+            );
+            let brute_force_start = Instant::now();
+            let references = query_vecs
                 .iter()
-                .filter(|id| brute_set.contains(id))
-                .count();
-
-            let recall_at_k = overlap_num as f32 / config.k as f32;
-            let exact_at_k = brute_force_ids.len() >= config.k
-                && search_result_ids.len() >= config.k
-                && &brute_force_ids[..config.k] == &search_result_ids[..config.k];
-            total_recall_at_k += recall_at_k;
-            if exact_at_k {
-                total_exact_at_k += 1;
-            }
+                .map(|query_vec| {
+                    let brute_force = exact_top_k(base_vecs, query_vec, config.k, TEST_METRIC);
+                    Some(brute_force.iter().map(|(id, _)| *id as u32).collect())
+                })
+                .collect();
+            println!(
+                "Ground truth calculation took: {:?}",
+                brute_force_start.elapsed()
+            );
+            references
         }
+        ReferenceSource::OfficialGroundTruth => {
+            println!(
+                "Loading official ground truth for {} queries...",
+                query_vecs.len()
+            );
+            let groundtruth_start = Instant::now();
+            let groundtruth_bytes = load_sift_bytes("data//sift1m//sift//sift_groundtruth.ivecs")
+                .expect("in function build_reference_top_k_ids, load groundtruth_bytes error");
+            let groundtruth_vecs = read_uvecs(&groundtruth_bytes, query_vecs.len());
+            let references = groundtruth_vecs
+                .into_iter()
+                .map(|groundtruth_vec| {
+                    let groundtruth_vec_top_k: Vec<u32> = groundtruth_vec
+                        .into_iter()
+                        .filter(|&id| id < config.base_limit as u32)
+                        .take(config.k)
+                        .collect();
+                    if groundtruth_vec_top_k.len() == config.k {
+                        Some(groundtruth_vec_top_k)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            println!(
+                "Official ground truth loading took: {:?}",
+                groundtruth_start.elapsed()
+            );
+            references
+        }
+    }
+}
 
-        println!("---");
-        println!(
-            "SUMMARY: base_limit={}, k={}, ef_search={}, query_limit={}",
-            config.base_limit, config.k, ef_search, config.query_limit
-        );
+fn run_sift1m_eval_pass(
+    index: &mut HnswIndex,
+    config: &Sift1mExperimentConfig,
+    query_vecs: &[Vec<f32>],
+    reference_top_k_ids: &[Option<Vec<u32>>],
+    ef_search: usize,
+) {
+    let mut total_recall_at_k: f32 = 0.0;
+    let mut total_exact_at_k = 0;
+    let mut total_search_time = Duration::default();
+    let mut valid_query_cnt = 0usize;
+
+    println!(
+        "--- base_limit={}, ef_search={} ---",
+        config.base_limit, ef_search
+    );
+
+    for (query_idx, (query_vec, reference_top_k_ids)) in query_vecs
+        .iter()
+        .zip(reference_top_k_ids.iter())
+        .enumerate()
+    {
+        let Some(reference_top_k_ids) = reference_top_k_ids.as_ref() else {
+            println!("Skip query[{}]: no valid reference top-k", query_idx);
+            continue;
+        };
+
+        valid_query_cnt += 1;
+        let search_start = Instant::now();
+        let search_result_ids = index.search_knn(query_vec, config.k, ef_search);
+        total_search_time += search_start.elapsed();
+
+        let search_result_ids_u32: Vec<u32> =
+            search_result_ids.iter().map(|&id| id as u32).collect();
+        let reference_set_top_k: HashSet<_> = reference_top_k_ids.iter().copied().collect();
+        let overlap_num = search_result_ids_u32
+            .iter()
+            .filter(|id| reference_set_top_k.contains(id))
+            .count();
+
+        let recall_at_k = overlap_num as f32 / config.k as f32;
+        let exact_at_k = search_result_ids_u32.len() >= config.k
+            && &reference_top_k_ids[..config.k] == &search_result_ids_u32[..config.k];
+        total_recall_at_k += recall_at_k;
+        if exact_at_k {
+            total_exact_at_k += 1;
+        }
+    }
+
+    println!("---");
+    println!(
+        "SUMMARY: base_limit={}, k={}, ef_search={}, query_limit={}, valid_query_cnt={}",
+        config.base_limit, config.k, ef_search, config.query_limit, valid_query_cnt
+    );
+
+    if valid_query_cnt == 0 {
+        println!("no valid queries under current base_limit");
+    } else {
+        println!("  valid_query_cnt = [{}]", valid_query_cnt);
         println!("  total_search_time = {:?}", total_search_time);
         println!(
             "  avg_search_time   = {:?}",
-            total_search_time / config.query_limit as u32
+            total_search_time / valid_query_cnt as u32
         );
         println!(
             "  recall@{} = [{}/{}]",
-            config.k, total_recall_at_k, config.query_limit
+            config.k, total_recall_at_k, valid_query_cnt
+        );
+        println!(
+            "  average recall@{} = [{}]",
+            config.k,
+            total_recall_at_k / valid_query_cnt as f32
         );
         println!(
             "  exact@{}  = [{}/{}]",
-            config.k, total_exact_at_k, config.query_limit
+            config.k, total_exact_at_k, valid_query_cnt
         );
         println!("---\n");
     }
@@ -218,126 +323,7 @@ fn sift1m_recall_smoke_test() {
         k: 5,
         ef_search: &[10],
         query_limit: 5,
+        reference_source: ReferenceSource::BruteForce,
     };
-    run_sift1m_experiment(&smoke_config);
-}
-
-// =========================
-// Dead Code: Groundtruth path
-// 当前主测试主体不再使用官方 groundtruth。
-// 这一段只作为历史参考保留，避免和当前 SIFT1M sweep 主路径混在一起。
-// =========================
-#[allow(dead_code)]
-fn run_hnsw_in_sift1m_case_groundtruth(
-    base_limit: usize,
-    k: usize,
-    ef_search: usize,
-    query_limit: usize,
-) {
-    let base_bytes = load_sift_bytes("data//sift1m//sift//sift_base.fvecs")
-        .expect("in function run_hnsw_in_sift1m_case, load base_bytes error");
-    let base_vecs = read_fvecs(&base_bytes, base_limit);
-    let mut index = build_index(&base_vecs, HNSW_BUILD_CONFIG);
-    index.print_timings();
-
-    let query_bytes = load_sift_bytes("data//sift1m//sift//sift_query.fvecs")
-        .expect("in function run_hnsw_in_sift1m_case, load query_bytes error");
-    let query_vecs = read_fvecs(&query_bytes, query_limit);
-
-    let groundtruth_bytes = load_sift_bytes("data//sift1m//sift//sift_groundtruth.ivecs")
-        .expect("in function run_hnsw_in_sift1m_case, load query_bytes error");
-    let groundtruth_vecs = read_uvecs(&groundtruth_bytes, query_limit);
-    // println!("{:#?}", groundtruth_vecs);
-
-    let mut valid_query_cnt = 0;
-    let mut total_recall_at_k: f32 = 0.0;
-    let mut total_exact_at_k = 0;
-    let mut total_search_time = Duration::default();
-    for (query_idx, query_vec) in query_vecs.iter().enumerate() {
-        // query没有单独的ID. query的序号就是它的隐式ID
-        // groundtruth 也按照同样的序号对齐.
-        // 在循环当中, 我们认为这个序号就是query_idx.
-
-        // 给一条 query 的 groundtruth，取得前 k 个整数 id的方法.
-        let groundtruth_vec = &groundtruth_vecs[query_idx]; //使用引用&: 只需要读取, 不需要修改, 不要从大Vec中移出元素
-                                                            // println!("groundtruth_vec : {:#?}", groundtruth_vec);
-        let groundtruth_vec_top_k: Vec<_> = groundtruth_vec
-            .iter()
-            .copied()
-            .filter(|&id| id < base_limit as u32)
-            .take(k)
-            .collect();
-
-        println!("groundtruth_vec_top_k : {:#?}", groundtruth_vec_top_k);
-        //只有当 groundtruth_vec_top_k.len() == k 时，才把这条 query 纳入统计
-        if groundtruth_vec_top_k.len() != k {
-            println!("Skip this query: groundtruth_vec_top_k.len() != k");
-            continue;
-        }
-        // valid_query_cnt 表示“真正纳入 recall/exact 统计的 query 数”
-        valid_query_cnt += 1;
-        let search_start = Instant::now();
-        let search_result_ids = index.search_knn(&query_vec, k, ef_search);
-        println!(
-            "query[{}] search took: {:?}",
-            query_idx,
-            search_start.elapsed()
-        );
-        total_search_time += search_start.elapsed();
-        let search_result_ids_u32: Vec<u32> =
-            search_result_ids.iter().map(|&id| id as u32).collect();
-
-        let groundtruth_set_top_k: HashSet<_> = groundtruth_vec_top_k.iter().copied().collect();
-        let overlap: Vec<_> = search_result_ids_u32
-            .iter()
-            .copied()
-            .filter(|id| groundtruth_set_top_k.contains(id))
-            .collect();
-        let overlap_num = overlap.len();
-
-        let recall_at_k = overlap_num as f32 / k as f32;
-        let exact_at_k = groundtruth_vec_top_k.len() >= k
-            && search_result_ids.len() >= k
-            && &groundtruth_vec_top_k[..k] == &search_result_ids_u32[..k];
-
-        total_recall_at_k += recall_at_k;
-        if exact_at_k {
-            total_exact_at_k += 1;
-        }
-    }
-
-    // 关于top-k中涉及到的两个指标:
-    // recall@k : 前k个命中了多少个. 不要求顺序一致, 只要求id部分或全部重合. 可以是一个计数值或者百分比分数.
-    // exact@k  : 前k个是否完全一致. 要求顺序一致, 要求id全部重合. 是一个布尔值.
-
-    println!("---");
-    println!(
-        "SUMMARY: base_limit={}, k={}, ef_search={}, query_limit={}, valid_query_cnt={}",
-        base_limit, k, ef_search, query_limit, valid_query_cnt
-    );
-
-    if valid_query_cnt == 0 {
-        println!("no valid queries under current base_limit");
-    } else {
-        println!("  valid_query_cnt = [{}]", valid_query_cnt);
-        println!("  total_search_time = {:?}", total_search_time);
-        println!(
-            "  avg_search_time   = {:?}",
-            total_search_time / valid_query_cnt as u32
-        );
-        println!(
-            "  recall@{} = [{}/{}]",
-            k, total_recall_at_k, valid_query_cnt
-        );
-        println!(
-            "  average recall@{} = [{}]",
-            k,
-            total_recall_at_k / valid_query_cnt as f32
-        );
-        println!(
-            "  exact@{}  = [{}/{}]",
-            k, total_exact_at_k, valid_query_cnt
-        );
-        println!("---\n");
-    }
+    run_sift1m_experiment_with_reference_source(&smoke_config, ReferenceSource::BruteForce);
 }

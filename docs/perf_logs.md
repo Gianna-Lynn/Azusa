@@ -378,3 +378,49 @@ Experiment: `SIFT1M recall sweep after enabling heuristic neighbor selection for
 - 建图时间从 `25.227798s` 升到 `26.607152s`, 约慢 `5.5%`; `search_layer` 插入耗时从 `17.91s` 升到 `18.56s`, 约慢 `3.6%`。反向裁剪 heuristic 带来额外候选多样性检查, 但增量成本相对新节点连边 heuristic 更小。
 - 查询侧中低档本次反而更快, 例如 `ef_search=100` 从 `347.366us` 降到 `252.872us`, 同时质量更高; 高档 `ef_search=300` 从 `616.848us` 升到 `709.235us`, 说明全量 heuristic 改变了图结构后, 不同搜索宽度下的探索路径成本不同。
 - 和同日 workspace 相似度缓存版本相比, `ef_search=300` 的 `recall@5` 从 `90.6%` 提升到 `97.0%`, `exact@5` 从 `70%` 提升到 `89%`, 是当前留档版本里质量最高的一版。
+
+## 2026-04-22
+
+Experiment: `SIFT1M recall sweep for the 2026-04-22 HNSW tuning batch`
+
+- base_limit: `100000`
+- k: `5`
+- query_limit: `100`
+- ef_construction: `80`
+- m: `4`
+- m_max: `8`
+- metric: `L2`
+- change: 这一轮先后包含 `search_layer` 语义对齐、候选分数复用、L2 内部快路径、层级采样参数化、重复边调试护栏、旧辅助状态清理，最终把 `distance::l2_squared_unchecked` 里的 `mul_add` 改回普通乘加
+
+### Build Summary
+
+| item | value |
+| --- | ---: |
+| build_index time | 25.0554423s |
+| ground truth time | 1.4226337s |
+| insert count | 100000 |
+
+### Insert Timings
+
+| phase | time | share |
+| --- | ---: | ---: |
+| greedy_search | 1.89s | 7.6% |
+| search_layer | 20.64s | 83.0% |
+
+### Query Results
+
+| ef_search | total_search_time | avg_search_time | recall@5 | exact@5 |
+| --------: | ----------------: | --------------: | -------: | ------: |
+|        60 |          12.9318ms |         129.318us |    87.0% |     62% |
+|        80 |          18.4962ms |         184.962us |    90.0% |     70% |
+|       100 |          22.8890ms |         228.890us |    92.2% |     75% |
+|       150 |          33.9553ms |         339.553us |    94.4% |     81% |
+|       200 |          40.0978ms |         400.978us |    95.8% |     86% |
+|       300 |          52.2015ms |         522.015us |    97.0% |     89% |
+
+### Notes
+
+- 这次结果确认了 `mul_add` 在当前平台上是负优化，改回普通乘加后，建图和查询都明显恢复。
+- `recall@5` / `exact@5` 保持与前一版一致，说明这是纯性能回归修复，不影响搜索语义。
+- `ef_search=300` 的平均查询时间回落到 `522.015us`, 比之前那次 `mul_add` 版本明显更快。
+- 这份记录对应的是 4.22 当天整组 HNSW 调整的最终落点，而不是单独一个回退动作。

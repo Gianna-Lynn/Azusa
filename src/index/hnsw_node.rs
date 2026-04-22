@@ -41,6 +41,15 @@ impl HnswNode {
 
     pub fn add_neighbor(&mut self, neighbor_index: usize, level_to_add: usize) {
         if level_to_add < self.neighbors.len() {
+            // 邻接表按集合语义使用: 同一层不应重复保存同一个neighbor。
+            // 先用debug_assert守住这个invariant, 后续pruning优化才能安全减少去重兜底。
+            debug_assert!(
+                !self.neighbors[level_to_add].contains(&neighbor_index),
+                "duplicate neighbor: node_id={}, neighbor_index={}, level={}",
+                self.id,
+                neighbor_index,
+                level_to_add
+            );
             self.neighbors[level_to_add].push(neighbor_index);
         }
     }

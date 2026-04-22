@@ -24,7 +24,6 @@ pub struct SearchLayerWorkspace {
     pub sim_marks: Vec<u32>,  //同样的设计, 用于search_layer
     pub sim_values: Vec<f32>, //缓存相似度计算结果, 避免重复计算
 
-    pub select_neighbor_epoch: u32,
     pub work_heap: BinaryHeap<(NotNan<f32>, Reverse<usize>)>,
     pub discard_heap: BinaryHeap<(NotNan<f32>, Reverse<usize>)>,
 }
@@ -40,7 +39,6 @@ impl SearchLayerWorkspace {
             sim_marks: Vec::new(),
             sim_values: Vec::new(),
 
-            select_neighbor_epoch: 0,
             work_heap: BinaryHeap::new(),
             discard_heap: BinaryHeap::new(),
         }
@@ -74,7 +72,6 @@ impl SearchLayerWorkspace {
     }
 
     pub fn reset_select_neighbor_workspace(&mut self, node_count: usize) {
-        self.select_neighbor_epoch += 1;
         if self.work_heap.capacity() < node_count {
             self.work_heap.reserve(node_count);
         }

@@ -24,72 +24,72 @@ const TEST_METRIC: Metric = Metric::L2;
 // query_limit  控制了我们从sift1m的文件里, 只读前多少条查询向量. 这个参数越大, 实验结果越稳定, 但是测试时间越长.
 
 /**************************  参数配置  **************************/
+// 控制HNSW图怎么构建: 连边宽度、每层保留边数、以及随机层级分布。
 #[derive(Debug, Clone, Copy)]
-struct HnswBuildParams {
+struct HnswIndexBuildConfig {
     ef_construction: usize,
     m: usize,
     m_max: usize,
+    level_sample_probability: f64,
 }
 
+const HNSW_BUILD_CONFIG: HnswIndexBuildConfig = HnswIndexBuildConfig {
+    ef_construction: 80,
+    m: 4,
+    m_max: 8,
+    level_sample_probability: 0.5,
+};
+
+// 控制SIFT1M实验规模和查询阶段ef_search扫参。
 #[derive(Debug, Clone)]
-struct Sift1mEfSearchSweepGroup {
+struct Sift1mExperimentConfig {
     base_limit: usize,
     k: usize,
     ef_search: &'static [usize],
     query_limit: usize,
 }
 
-const HNSW_IN_SIFT1M_PARAMS_GROUP: &[Sift1mEfSearchSweepGroup] = &[Sift1mEfSearchSweepGroup {
+const SIFT1M_EXPERIMENTS: &[Sift1mExperimentConfig] = &[Sift1mExperimentConfig {
     base_limit: 100000,
     k: 5,
     ef_search: &[60, 80, 100, 150, 200, 300],
     query_limit: 100,
 }];
 
-const DEFAULT_HNSW_BUILD_PARAMS: HnswBuildParams = HnswBuildParams {
-    ef_construction: 80,
-    m: 4,
-    m_max: 8,
-};
-
 /**************************  测试主体  **************************/
 #[test]
 fn test_hnsw_in_sift1m() {
-    run_sift1m_experiments(HNSW_IN_SIFT1M_PARAMS_GROUP);
-}
-
-fn run_sift1m_experiments(cases: &[Sift1mEfSearchSweepGroup]) {
-    for case in cases {
-        run_sift1m_experiment_case(case);
+    for experiment_config in SIFT1M_EXPERIMENTS {
+        run_sift1m_experiment(experiment_config);
     }
 }
 
-fn run_sift1m_experiment_case(case: &Sift1mEfSearchSweepGroup) {
+fn run_sift1m_experiment(config: &Sift1mExperimentConfig) {
     let base_bytes = load_sift_bytes("data//sift1m//sift//sift_base.fvecs")
-        .expect("in function run_sift1m_experiment_case, load base_bytes error");
-    let base_vecs = read_fvecs(&base_bytes, case.base_limit);
+        .expect("in function run_sift1m_experiment, load base_bytes error");
+    let base_vecs = read_fvecs(&base_bytes, config.base_limit);
 
     let build_start = Instant::now();
-    let mut index = build_index(&base_vecs, DEFAULT_HNSW_BUILD_PARAMS);
+    let mut index = build_index(&base_vecs, HNSW_BUILD_CONFIG);
     println!(
         "base_limit={} build_index took: {:?}",
-        case.base_limit,
+        config.base_limit,
         build_start.elapsed()
     );
     index.print_timings();
 
     let query_bytes = load_sift_bytes("data//sift1m//sift//sift_query.fvecs")
-        .expect("in function run_sift1m_experiment_case, load query_bytes error");
-    let query_vecs = read_fvecs(&query_bytes, case.query_limit);
+        .expect("in function run_sift1m_experiment, load query_bytes error");
+    let query_vecs = read_fvecs(&query_bytes, config.query_limit);
 
-    let mut all_brute_force_ids = Vec::with_capacity(case.query_limit);
+    let mut all_brute_force_ids = Vec::with_capacity(config.query_limit);
     println!(
         "Pre-calculating brute-force ground truth for {} queries...",
-        case.query_limit
+        config.query_limit
     );
     let brute_force_start = Instant::now();
     for query_vec in &query_vecs {
-        let brute_force = exact_top_k(&base_vecs, query_vec, case.k, TEST_METRIC);
+        let brute_force = exact_top_k(&base_vecs, query_vec, config.k, TEST_METRIC);
         let brute_force_ids: Vec<_> = brute_force.iter().map(|(id, _)| *id).collect();
         all_brute_force_ids.push(brute_force_ids);
     }
@@ -98,17 +98,17 @@ fn run_sift1m_experiment_case(case: &Sift1mEfSearchSweepGroup) {
         brute_force_start.elapsed()
     );
 
-    for &ef_search in case.ef_search {
+    for &ef_search in config.ef_search {
         let mut total_recall_at_k: f32 = 0.0;
         let mut total_exact_at_k = 0;
         let mut total_search_time = Duration::default();
         println!(
             "--- base_limit={}, ef_search={} ---",
-            case.base_limit, ef_search
+            config.base_limit, ef_search
         );
         for (idx, query_vec) in query_vecs.iter().enumerate() {
             let search_start = Instant::now();
-            let search_result_ids = index.search_knn(query_vec, case.k, ef_search);
+            let search_result_ids = index.search_knn(query_vec, config.k, ef_search);
             total_search_time += search_start.elapsed();
             let brute_force_ids = &all_brute_force_ids[idx];
 
@@ -118,10 +118,10 @@ fn run_sift1m_experiment_case(case: &Sift1mEfSearchSweepGroup) {
                 .filter(|id| brute_set.contains(id))
                 .count();
 
-            let recall_at_k = overlap_num as f32 / case.k as f32;
-            let exact_at_k = brute_force_ids.len() >= case.k
-                && search_result_ids.len() >= case.k
-                && &brute_force_ids[..case.k] == &search_result_ids[..case.k];
+            let recall_at_k = overlap_num as f32 / config.k as f32;
+            let exact_at_k = brute_force_ids.len() >= config.k
+                && search_result_ids.len() >= config.k
+                && &brute_force_ids[..config.k] == &search_result_ids[..config.k];
             total_recall_at_k += recall_at_k;
             if exact_at_k {
                 total_exact_at_k += 1;
@@ -131,20 +131,20 @@ fn run_sift1m_experiment_case(case: &Sift1mEfSearchSweepGroup) {
         println!("---");
         println!(
             "SUMMARY: base_limit={}, k={}, ef_search={}, query_limit={}",
-            case.base_limit, case.k, ef_search, case.query_limit
+            config.base_limit, config.k, ef_search, config.query_limit
         );
         println!("  total_search_time = {:?}", total_search_time);
         println!(
             "  avg_search_time   = {:?}",
-            total_search_time / case.query_limit as u32
+            total_search_time / config.query_limit as u32
         );
         println!(
             "  recall@{} = [{}/{}]",
-            case.k, total_recall_at_k, case.query_limit
+            config.k, total_recall_at_k, config.query_limit
         );
         println!(
             "  exact@{}  = [{}/{}]",
-            case.k, total_exact_at_k, case.query_limit
+            config.k, total_exact_at_k, config.query_limit
         );
         println!("---\n");
     }
@@ -191,11 +191,11 @@ pub fn exact_top_k(
     results
 }
 
-fn build_index(base_vecs: &[Vec<f32>], params: HnswBuildParams) -> HnswIndex {
-    let mut index = HnswIndex::new_with_metric(TEST_METRIC);
+fn build_index(base_vecs: &[Vec<f32>], config: HnswIndexBuildConfig) -> HnswIndex {
+    let mut index = HnswIndex::new(TEST_METRIC, config.level_sample_probability);
     println!(
-        "insert params: ef_construction={}, m={}, m_max={}",
-        params.ef_construction, params.m, params.m_max
+        "HNSW build config: ef_construction={}, m={}, m_max={}, level_sample_probability={}",
+        config.ef_construction, config.m, config.m_max, config.level_sample_probability
     );
 
     for (id, base_vec) in base_vecs.iter().enumerate() {
@@ -203,9 +203,9 @@ fn build_index(base_vecs: &[Vec<f32>], params: HnswBuildParams) -> HnswIndex {
         index.insert(
             id as u64,
             base_vec.clone(),
-            params.ef_construction,
-            params.m,
-            params.m_max,
+            config.ef_construction,
+            config.m,
+            config.m_max,
         );
     }
     index
@@ -213,13 +213,13 @@ fn build_index(base_vecs: &[Vec<f32>], params: HnswBuildParams) -> HnswIndex {
 
 #[test]
 fn sift1m_recall_smoke_test() {
-    let smoke_cases = [Sift1mEfSearchSweepGroup {
+    let smoke_config = Sift1mExperimentConfig {
         base_limit: 10,
         k: 5,
         ef_search: &[10],
         query_limit: 5,
-    }];
-    run_sift1m_experiments(&smoke_cases);
+    };
+    run_sift1m_experiment(&smoke_config);
 }
 
 // =========================
@@ -237,7 +237,7 @@ fn run_hnsw_in_sift1m_case_groundtruth(
     let base_bytes = load_sift_bytes("data//sift1m//sift//sift_base.fvecs")
         .expect("in function run_hnsw_in_sift1m_case, load base_bytes error");
     let base_vecs = read_fvecs(&base_bytes, base_limit);
-    let mut index = build_index(&base_vecs, DEFAULT_HNSW_BUILD_PARAMS);
+    let mut index = build_index(&base_vecs, HNSW_BUILD_CONFIG);
     index.print_timings();
 
     let query_bytes = load_sift_bytes("data//sift1m//sift//sift_query.fvecs")

@@ -28,6 +28,7 @@ pub struct HnswIndex {
     metric: Metric,
     id_to_index: HashMap<Id, usize>,
     rng: StdRng,
+    level_sample_probability: f64,
     timing: InsertTimings,
     workspace: SearchLayerWorkspace,
 }

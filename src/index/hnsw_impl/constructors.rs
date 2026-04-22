@@ -7,11 +7,12 @@ use crate::types::Metric;
 use super::super::{HnswIndex, SearchLayerWorkspace};
 
 impl HnswIndex {
-    pub fn new() -> Self {
-        Self::new_with_metric(Metric::Cosine)
-    }
+    pub fn new(metric: Metric, level_sample_probability: f64) -> Self {
+        assert!(
+            level_sample_probability > 0.0 && level_sample_probability < 1.0,
+            "level_sample_probability must be in (0, 1)"
+        );
 
-    pub fn new_with_metric(metric: Metric) -> Self {
         Self {
             nodes: Vec::new(),
             entry_node_index: None,
@@ -19,6 +20,7 @@ impl HnswIndex {
             metric,
             id_to_index: HashMap::new(),
             rng: rand::rngs::StdRng::seed_from_u64(super::super::MY_SEED),
+            level_sample_probability,
             timing: super::super::hnsw_stats::InsertTimings::default(),
             workspace: SearchLayerWorkspace::new(),
         }

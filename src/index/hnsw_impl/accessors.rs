@@ -35,6 +35,10 @@ impl HnswIndex {
         self.entry_node_index.map(|idx| self.get_id_by_index(idx))
     }
 
+    pub fn level_sample_probability(&self) -> f64 {
+        self.level_sample_probability
+    }
+
     pub fn find_index_of_id_in_neighbors(target_id: Id, target_vector: &[Id]) -> Option<usize> {
         for (idx, &x) in target_vector.iter().enumerate() {
             if x == target_id {

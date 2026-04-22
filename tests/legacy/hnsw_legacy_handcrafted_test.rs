@@ -10,7 +10,7 @@ use azusa::{index::hnsw::HnswIndex, types::Id};
 /// id: u64, data: Vec<f32>, lvl: usize
 /// 构图 helper
 fn build_index(nodes_data: Vec<(u64, Vec<f32>, usize)>) -> HnswIndex {
-    let mut index = HnswIndex::new();
+    let mut index = HnswIndex::new(TEST_METRIC, 0.5);
     let ef_construction = 10;
     let m = 2;
     let m_max = 4;
@@ -249,7 +249,7 @@ fn test_search_knn_multilevel_case() {
 #[test]
 fn test_insert_single_node_minimal() {
     // 单节点插入
-    let mut index = HnswIndex::new();
+    let mut index = HnswIndex::new(TEST_METRIC, 0.5);
     assert!(index.is_empty(), "初始图应为空");
 
     let id = 1u64;
@@ -277,7 +277,7 @@ fn test_insert_single_node_minimal() {
 #[test]
 fn test_insert_two_nodes_minimal() {
     // 两个节点至少要在某一层互相可达
-    let mut index = HnswIndex::new();
+    let mut index = HnswIndex::new(TEST_METRIC, 0.5);
 
     let id1 = 1u64;
     let data1 = vec![1.0, 0.0, 0.0];
@@ -331,7 +331,7 @@ fn test_insert_two_nodes_minimal() {
 #[test]
 fn test_insert_multiple_nodes_connected() {
     // 多个节点插入后，图里不应出现孤点
-    let mut index = HnswIndex::new();
+    let mut index = HnswIndex::new(TEST_METRIC, 0.5);
 
     let nodes_data = vec![
         (1u64, vec![1.0, 0.0, 0.0]),

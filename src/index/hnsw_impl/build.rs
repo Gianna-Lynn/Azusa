@@ -13,9 +13,8 @@ use super::super::{HnswIndex, HnswNode, SearchLayerWorkspace};
 
 impl HnswIndex {
     pub fn sample_level(&mut self) -> usize {
-        let p = 0.5;
         let mut level = 0usize;
-        while self.rng.gen_bool(p) {
+        while self.rng.gen_bool(self.level_sample_probability) {
             level += 1;
         }
         level

@@ -28,7 +28,7 @@ pub fn build_index(
     max_neighbors_to_select: usize,
     max_neighbors_to_keep: usize,
 ) -> HnswIndex {
-    let mut index = HnswIndex::new_with_metric(TEST_METRIC);
+    let mut index = HnswIndex::new(TEST_METRIC, 0.5);
     for (id, data, level) in nodes_data.iter() {
         index.insert_with_fixed_level_for_legacy(
             *id,

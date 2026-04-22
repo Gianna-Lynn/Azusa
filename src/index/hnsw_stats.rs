@@ -23,9 +23,3 @@ pub struct InsertTimings {
     pub search_layer_bookkeeping_ns: u128,
     pub search_layer_loop_iterations: u64,
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HeapAccessMode {
-    Peek,
-    Pop,
-}

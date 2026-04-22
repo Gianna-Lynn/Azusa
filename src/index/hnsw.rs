@@ -15,7 +15,7 @@ mod hnsw_stats;
 mod hnsw_workspace;
 
 pub use hnsw_node::HnswNode;
-pub use hnsw_stats::{HeapAccessMode, InsertTimings, SearchLayerStats};
+pub use hnsw_stats::{InsertTimings, SearchLayerStats};
 pub use hnsw_workspace::SearchLayerWorkspace;
 
 const MY_SEED: u64 = 42;

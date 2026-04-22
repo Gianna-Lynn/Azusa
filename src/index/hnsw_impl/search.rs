@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::types::{Id, Vector};
 
-use super::super::hnsw_stats::{HeapAccessMode, SearchLayerStats};
+use super::super::hnsw_stats::SearchLayerStats;
 use super::super::HnswIndex;
 
 impl HnswIndex {
@@ -21,11 +21,7 @@ impl HnswIndex {
         let metric = self.metric;
         let workspace = &mut self.workspace;
 
-        let mut candidate_alive_num: usize = 0;
-
         workspace.visited_marks[entry_index] = workspace.visited_epoch;
-        workspace.candidate_alive[entry_index] = true;
-        candidate_alive_num += 1;
 
         let entry_similarity =
             Self::get_similarity_from_workspace(nodes, metric, workspace, entry_index, query);
@@ -38,17 +34,8 @@ impl HnswIndex {
             entry_index,
         ));
 
-        while candidate_alive_num > 0 {
+        while let Some((_, current_candidate_index)) = workspace.candidate_heap.pop() {
             stats.loop_iterations += 1;
-            let current_candidate_index = Self::get_heap_extreme_refer_alive_bool_vec(
-                &workspace.candidate_alive,
-                &mut workspace.candidate_heap,
-                HeapAccessMode::Pop,
-            )
-            .expect("current_candidate_index不存在");
-
-            workspace.candidate_alive[current_candidate_index] = false;
-            candidate_alive_num -= 1;
 
             let worst_result_similarity = workspace
                 .result_heap
@@ -94,9 +81,6 @@ impl HnswIndex {
                 if neighbor_similarity >= worst_result_similarity
                     || workspace.result_heap.len() < ef
                 {
-                    workspace.candidate_alive[neighbor_index] = true;
-                    candidate_alive_num += 1;
-
                     workspace.candidate_heap.push((
                         ordered_float::NotNan::new(neighbor_similarity).unwrap(),
                         neighbor_index,

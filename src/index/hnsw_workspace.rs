@@ -8,7 +8,6 @@ use ordered_float::NotNan;
 pub struct SearchLayerWorkspace {
     pub visited_epoch: u32,
     pub visited_marks: Vec<u32>, //代替visited_bool, 内含epoch轮次数, 若visited_marks[i] == epoch 表示 第i个点最后一次被访问是在第 #epoch个轮次.
-    pub candidate_alive: Vec<bool>,
     pub candidate_heap: BinaryHeap<(NotNan<f32>, usize)>,
     pub result_heap: BinaryHeap<(Reverse<NotNan<f32>>, usize)>,
 
@@ -26,7 +25,6 @@ impl SearchLayerWorkspace {
         Self {
             visited_epoch: 0,
             visited_marks: Vec::new(),
-            candidate_alive: Vec::new(),
             candidate_heap: BinaryHeap::new(),
             result_heap: BinaryHeap::new(),
             sim_epoch: 0,
@@ -47,9 +45,6 @@ impl SearchLayerWorkspace {
         if self.visited_marks.len() < node_count {
             //只有当节点数增加时才扩容, 避免每轮都resize
             self.visited_marks.resize(node_count, 0);
-        }
-        if self.candidate_alive.len() < node_count {
-            self.candidate_alive.resize(node_count, false);
         }
         self.candidate_heap.clear();
         self.result_heap.clear();

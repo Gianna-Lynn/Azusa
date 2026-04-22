@@ -46,3 +46,21 @@ pub fn squared_euclidean_l2_distance(a: &[f32], b: &[f32]) -> f32 {
     //sum.sqrt()
     sum
 }
+
+#[inline]
+pub(crate) fn l2_squared_unchecked(a: &[f32], b: &[f32]) -> f32 {
+    // 这里不再重复做长度检查: 调用方要先保证维度一致, 以减少热路径上的额外开销。
+    debug_assert_eq!(a.len(), b.len(), "dimension mismatch");
+
+    let mut sum = 0.0f32;
+    for (x, y) in a.iter().zip(b.iter()) {
+        let diff = x - y;
+        sum = diff.mul_add(diff, sum);
+    }
+    sum
+}
+
+#[inline]
+pub(crate) fn l2_similarity_unchecked(a: &[f32], b: &[f32]) -> f32 {
+    1.0 / (1.0 + l2_squared_unchecked(a, b))
+}

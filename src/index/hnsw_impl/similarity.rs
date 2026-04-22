@@ -40,8 +40,11 @@ impl HnswIndex {
         if workspace.sim_marks[target_index] == workspace.sim_epoch {
             workspace.sim_values[target_index]
         } else {
-            let new_similarity =
-                distance::similarity(nodes[target_index].get_data(), query, metric);
+            let target_data = nodes[target_index].get_data();
+            let new_similarity = match metric {
+                Metric::L2 => distance::l2_similarity_unchecked(target_data, query),
+                Metric::Cosine => distance::similarity(target_data, query, metric),
+            };
             workspace.sim_marks[target_index] = workspace.sim_epoch;
             workspace.sim_values[target_index] = new_similarity;
             new_similarity

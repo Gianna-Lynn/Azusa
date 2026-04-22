@@ -55,7 +55,7 @@ pub(crate) fn l2_squared_unchecked(a: &[f32], b: &[f32]) -> f32 {
     let mut sum = 0.0f32;
     for (x, y) in a.iter().zip(b.iter()) {
         let diff = x - y;
-        sum = diff.mul_add(diff, sum);
+        sum += diff * diff;
     }
     sum
 }

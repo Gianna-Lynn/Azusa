@@ -1,4 +1,4 @@
-use crate::types::Id;
+use crate::types::{Id, Metadata, VectorRecord};
 
 use super::super::{HnswIndex, HnswNode};
 
@@ -42,6 +42,15 @@ impl HnswIndex {
     pub fn get_node_by_id(&self, target_id: Id) -> Option<&HnswNode> {
         self.get_index_by_id(target_id)
             .and_then(|idx| self.get_node_by_index(idx))
+    }
+
+    pub fn get_record_by_id(&self, target_id: Id) -> Option<&VectorRecord> {
+        self.records.get(&target_id)
+    }
+
+    pub fn get_by_id(&self, target_id: Id) -> Option<&Metadata> {
+        self.get_record_by_id(target_id)
+            .map(|record| &record.metadata)
     }
 
     pub fn get_mut_node_by_id(&mut self, target_id: Id) -> Option<&mut HnswNode> {

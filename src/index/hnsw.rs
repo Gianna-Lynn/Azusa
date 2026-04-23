@@ -1,7 +1,7 @@
 use rand::rngs::StdRng;
 use std::collections::HashMap;
 
-use crate::types::{Id, Metric};
+use crate::types::{Id, Metric, VectorRecord};
 
 #[path = "hnsw_impl.rs"]
 mod hnsw_impl;
@@ -23,6 +23,7 @@ const MY_SEED: u64 = 42;
 #[derive(Debug)]
 pub struct HnswIndex {
     nodes: Vec<HnswNode>,
+    records: HashMap<Id, VectorRecord>,
     entry_node_index: Option<usize>,
     index_max_level: usize,
     metric: Metric,

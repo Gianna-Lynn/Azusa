@@ -15,6 +15,7 @@ impl HnswIndex {
 
         Self {
             nodes: Vec::new(),
+            records: HashMap::new(),
             entry_node_index: None,
             index_max_level: 0,
             metric,

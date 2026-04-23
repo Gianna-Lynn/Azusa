@@ -5,15 +5,25 @@ pub type Id = u64;
 // 向量本体（以后可以换成别的结构）
 pub type Vector = Vec<f32>;
 
-// 一条记录：id + 向量
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct Metadata {
+    pub doc_id: Option<String>,
+    pub chunk_id: Option<String>,
+    pub source: Option<String>,
+    pub page: Option<u32>,
+}
+
+// 一条记录：id + 向量 + metadata
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 //Rust中提供的派生宏语法，让编译器自动为这个结构体生成Clone和Debug trait的默认实现，不需要手动编码
-pub struct Record {
+pub struct VectorRecord {
     pub id: Id,
     pub vector: Vector,
-    // 最简单的Record结构体,包含一个id(u64类型)和一个vector(Vec<f32>类型).
-    //未来可以根据需要添加更多字段,比如metadata等.
+    #[serde(default)]
+    pub metadata: Metadata,
 }
+
+pub type Record = VectorRecord;
 
 // 搜索结果：搜索的是哪一个id，匹配程度有多好
 #[derive(Clone, Debug)]

@@ -4,6 +4,24 @@ use super::super::hnsw_stats::SearchLayerStats;
 use super::super::HnswIndex;
 
 impl HnswIndex {
+    pub fn search(&mut self, query: &Vector, k: usize, ef_search: usize) -> Vec<(Id, f32)> {
+        let Some(mut current_entry_index) = self.entry_node_index else {
+            return Vec::new();
+        };
+
+        for lvl in (1..=self.index_max_level).rev() {
+            current_entry_index = self.greedy_search_at_level(query, current_entry_index, lvl);
+        }
+
+        let (candidates, _) = self.search_layer(query, current_entry_index, 0, ef_search);
+
+        candidates
+            .into_iter()
+            .take(k)
+            .map(|(idx, score)| (self.get_id_by_index(idx), score))
+            .collect()
+    }
+
     pub fn search_layer(
         &mut self,
         query: &Vector,
@@ -148,20 +166,9 @@ impl HnswIndex {
     }
 
     pub fn search_knn(&mut self, query: &Vector, k: usize, ef_search: usize) -> Vec<Id> {
-        let Some(mut current_entry_index) = self.entry_node_index else {
-            return Vec::new();
-        };
-
-        for lvl in (1..=self.index_max_level).rev() {
-            current_entry_index = self.greedy_search_at_level(query, current_entry_index, lvl);
-        }
-
-        let (candidates, _) = self.search_layer(query, current_entry_index, 0, ef_search);
-
-        candidates
+        self.search(query, k, ef_search)
             .into_iter()
-            .take(k)
-            .map(|(idx, _)| self.get_id_by_index(idx))
+            .map(|(id, _)| id)
             .collect()
     }
 }

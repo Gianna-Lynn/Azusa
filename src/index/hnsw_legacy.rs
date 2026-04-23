@@ -1,7 +1,7 @@
 // Legacy-only helpers.
 // 这个文件只服务于旧路径 / 兼容测试，不属于正式 HNSW 实现路径。
 
-use crate::types::{Id, Vector};
+use crate::types::{Id, Metadata, Vector, VectorRecord};
 
 use super::{HnswIndex, HnswNode};
 
@@ -53,6 +53,14 @@ impl HnswIndex {
         max_neighbors_to_keep: usize,
         level: &usize,
     ) {
+        self.records.insert(
+            id,
+            VectorRecord {
+                id,
+                vector: data.clone(),
+                metadata: Metadata::default(),
+            },
+        );
         let new_node_level = *level;
         let data_copy = data.clone();
         let new_node = HnswNode::new(id, data_copy, new_node_level);

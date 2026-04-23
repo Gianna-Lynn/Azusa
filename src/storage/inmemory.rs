@@ -1,5 +1,5 @@
 use super::VectorStore;
-use crate::types::{Id, Record, Vector};
+use crate::types::{Id, Metadata, Record, Vector};
 use serde_json;
 
 /********************************************** Storage **********************************************/
@@ -35,7 +35,11 @@ impl VectorStore for InMemoryVectorStore {
         if let Some(rec) = self.data.iter_mut().find(|r| r.id == id) {
             rec.vector = vector;
         } else {
-            self.data.push(Record { id, vector });
+            self.data.push(Record {
+                id,
+                vector,
+                metadata: Metadata::default(),
+            });
         }
     }
 }

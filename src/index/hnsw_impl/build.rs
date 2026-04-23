@@ -6,12 +6,16 @@ use rand::Rng;
 
 use crate::{
     distance,
-    types::{Id, Metric, Vector},
+    types::{Id, Metadata, Metric, Vector, VectorRecord},
 };
 
 use super::super::{HnswIndex, HnswNode, SearchLayerWorkspace};
 
 impl HnswIndex {
+    fn store_record(&mut self, record: VectorRecord) {
+        self.records.insert(record.id, record);
+    }
+
     pub fn sample_level(&mut self) -> usize {
         let mut level = 0usize;
         while self.rng.gen_bool(self.level_sample_probability) {
@@ -21,6 +25,52 @@ impl HnswIndex {
     }
 
     pub fn insert(
+        &mut self,
+        id: Id,
+        data: Vector,
+        ef_construction: usize,
+        max_neighbors_to_select: usize,
+        max_neighbors_to_keep: usize,
+    ) {
+        self.store_record(VectorRecord {
+            id,
+            vector: data.clone(),
+            metadata: Metadata::default(),
+        });
+        self.insert_prepared(id, data, ef_construction, max_neighbors_to_select, max_neighbors_to_keep);
+    }
+
+    pub fn insert_record(
+        &mut self,
+        record: VectorRecord,
+        ef_construction: usize,
+        max_neighbors_to_select: usize,
+        max_neighbors_to_keep: usize,
+    ) {
+        let id = record.id;
+        let vector = record.vector.clone();
+        self.store_record(record);
+        self.insert_prepared(id, vector, ef_construction, max_neighbors_to_select, max_neighbors_to_keep);
+    }
+
+    pub fn batch_insert(
+        &mut self,
+        records: Vec<VectorRecord>,
+        ef_construction: usize,
+        max_neighbors_to_select: usize,
+        max_neighbors_to_keep: usize,
+    ) {
+        for record in records {
+            self.insert_record(
+                record,
+                ef_construction,
+                max_neighbors_to_select,
+                max_neighbors_to_keep,
+            );
+        }
+    }
+
+    fn insert_prepared(
         &mut self,
         id: Id,
         data: Vector,
@@ -223,7 +273,7 @@ impl HnswIndex {
         query: &Vector,
         max_neighbors_to_select: usize,
         level: usize,
-        _extend_candidates: bool,
+        extend_candidates: bool,
         keep_pruned_connections: bool,
     ) -> Vec<usize> {
         self.workspace.reset_select_neighbor_workspace(self.nodes.len());

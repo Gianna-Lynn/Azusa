@@ -48,7 +48,7 @@ impl HnswIndex {
         self.records.get(&target_id)
     }
 
-    pub fn get_by_id(&self, target_id: Id) -> Option<&Metadata> {
+    pub fn get_metadata_by_id(&self, target_id: Id) -> Option<&Metadata> {
         self.get_record_by_id(target_id)
             .map(|record| &record.metadata)
     }

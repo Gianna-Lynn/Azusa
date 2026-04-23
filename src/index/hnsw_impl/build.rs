@@ -12,7 +12,7 @@ use crate::{
 use super::super::{HnswIndex, HnswNode, SearchLayerWorkspace};
 
 impl HnswIndex {
-    fn store_record(&mut self, record: VectorRecord) {
+    fn upsert_record(&mut self, record: VectorRecord) {
         self.records.insert(record.id, record);
     }
 
@@ -32,15 +32,21 @@ impl HnswIndex {
         max_neighbors_to_select: usize,
         max_neighbors_to_keep: usize,
     ) {
-        self.store_record(VectorRecord {
+        self.upsert_record(VectorRecord {
             id,
             vector: data.clone(),
             metadata: Metadata::default(),
         });
-        self.insert_prepared(id, data, ef_construction, max_neighbors_to_select, max_neighbors_to_keep);
+        self.insert_into_graph(
+            id,
+            data,
+            ef_construction,
+            max_neighbors_to_select,
+            max_neighbors_to_keep,
+        );
     }
 
-    pub fn insert_record(
+    pub fn insert_vector_record(
         &mut self,
         record: VectorRecord,
         ef_construction: usize,
@@ -49,8 +55,14 @@ impl HnswIndex {
     ) {
         let id = record.id;
         let vector = record.vector.clone();
-        self.store_record(record);
-        self.insert_prepared(id, vector, ef_construction, max_neighbors_to_select, max_neighbors_to_keep);
+        self.upsert_record(record);
+        self.insert_into_graph(
+            id,
+            vector,
+            ef_construction,
+            max_neighbors_to_select,
+            max_neighbors_to_keep,
+        );
     }
 
     pub fn batch_insert(
@@ -61,7 +73,7 @@ impl HnswIndex {
         max_neighbors_to_keep: usize,
     ) {
         for record in records {
-            self.insert_record(
+            self.insert_vector_record(
                 record,
                 ef_construction,
                 max_neighbors_to_select,
@@ -70,7 +82,7 @@ impl HnswIndex {
         }
     }
 
-    fn insert_prepared(
+    fn insert_into_graph(
         &mut self,
         id: Id,
         data: Vector,

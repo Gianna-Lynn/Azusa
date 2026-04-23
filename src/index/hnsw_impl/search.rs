@@ -4,7 +4,11 @@ use super::super::hnsw_stats::SearchLayerStats;
 use super::super::HnswIndex;
 
 impl HnswIndex {
-    pub fn search(&mut self, query: &Vector, k: usize, ef_search: usize) -> Vec<(Id, f32)> {
+    fn search_top_k_candidates(
+        &mut self,
+        query: &Vector,
+        ef_search: usize,
+    ) -> Vec<(usize, f32)> {
         let Some(mut current_entry_index) = self.entry_node_index else {
             return Vec::new();
         };
@@ -14,8 +18,16 @@ impl HnswIndex {
         }
 
         let (candidates, _) = self.search_layer(query, current_entry_index, 0, ef_search);
-
         candidates
+    }
+
+    pub fn search_knn_with_scores(
+        &mut self,
+        query: &Vector,
+        k: usize,
+        ef_search: usize,
+    ) -> Vec<(Id, f32)> {
+        self.search_top_k_candidates(query, ef_search)
             .into_iter()
             .take(k)
             .map(|(idx, score)| (self.get_id_by_index(idx), score))
@@ -166,9 +178,11 @@ impl HnswIndex {
     }
 
     pub fn search_knn(&mut self, query: &Vector, k: usize, ef_search: usize) -> Vec<Id> {
-        self.search(query, k, ef_search)
+        self.search_top_k_candidates(query, ef_search)
             .into_iter()
+            .take(k)
             .map(|(id, _)| id)
+            .map(|idx| self.get_id_by_index(idx))
             .collect()
     }
 }

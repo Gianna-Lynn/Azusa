@@ -51,7 +51,7 @@ struct Sift1mExperimentConfig {
 }
 
 const SIFT1M_EXPERIMENTS: &[Sift1mExperimentConfig] = &[Sift1mExperimentConfig {
-    base_limit: 1000000,
+    base_limit: 100000,
     k: 5,
     ef_search: &[60, 80, 100, 150, 200, 300],
     query_limit: 100,

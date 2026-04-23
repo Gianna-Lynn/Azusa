@@ -74,8 +74,11 @@ impl HnswIndex {
             let t = Instant::now();
             let selected_neighbors = self.select_neighbors_heuristic(
                 &search_results,
+                &data,
                 max_neighbors_to_select,
                 current_lvl,
+                true,
+                true,
             );
             self.timing.select_neighbors_ns += t.elapsed().as_nanos();
 
@@ -88,29 +91,25 @@ impl HnswIndex {
 
             let t = Instant::now();
             for &neighbor_index in &selected_neighbors {
-                let neighbor_current_connections: HashSet<usize> = {
+                let neighbor_current_connections: Vec<usize> = {
                     let neighbor_node = self
                         .get_node_by_index(neighbor_index)
                         .expect("in insert, get_node_by_index cannot handle neighbor_index");
-                    neighbor_node.get_neighbors()[current_lvl]
-                        .iter()
-                        .copied()
-                        .collect()
+                    neighbor_node.get_neighbors()[current_lvl].clone()
                 };
 
                 if neighbor_current_connections.len() > max_neighbors_to_keep {
                     let neighbor_pruned_connections: Vec<usize> = {
-                        let nodes = &self.nodes;
-                        let metric = self.metric;
-                        let workspace = &mut self.workspace;
-                        let neighbor_data = nodes[neighbor_index].get_data();
-
-                        Self::select_neighbors_heuristic_from_parts(
-                            nodes,
-                            metric,
-                            workspace,
+                        let neighbor_data = self.nodes[neighbor_index].get_data().clone();
+                        let scored_candidates = self.score_and_sort_level_candidates(
                             &neighbor_current_connections,
-                            neighbor_data,
+                            &neighbor_data,
+                            current_lvl,
+                        );
+
+                        self.select_neighbors_heuristic(
+                            &scored_candidates,
+                            &neighbor_data,
                             max_neighbors_to_keep,
                             current_lvl,
                             false,
@@ -174,23 +173,6 @@ impl HnswIndex {
         )
     }
 
-    pub fn select_neighbors_heuristic(
-        &mut self,
-        scored_candidates: &[(usize, f32)],
-        max_neighbors_to_select: usize,
-        level: usize,
-    ) -> Vec<usize> {
-        Self::select_neighbors_heuristic_from_scored_candidates(
-            &self.nodes,
-            self.metric,
-            &mut self.workspace,
-            scored_candidates,
-            max_neighbors_to_select,
-            level,
-            true,
-        )
-    }
-
     fn select_neighbors_simple_from_parts(
         nodes: &[HnswNode],
         metric: Metric,
@@ -228,60 +210,117 @@ impl HnswIndex {
             .collect()
     }
 
-    fn select_neighbors_heuristic_from_parts(
-        nodes: &[HnswNode],
-        metric: Metric,
-        workspace: &mut SearchLayerWorkspace,
-        candidate_set: &HashSet<usize>, // 一个index的集合.
-        query: &Vector,                 // q
-        max_neighbors_to_select: usize, //m :number of neighbors to return
+    // 大橘:
+    // 这是统一的 heuristic 下游入口, 只接受按 similarity 排好序的 scored candidates。
+    // 在建图里它会被用在两个阶段:
+    // 1. 新节点接入图时: search_layer 已经直接返回 scored candidates, 可以原样喂进来。
+    // 2. 旧节点反向边 pruning 时: 先把当前邻接表重新打分并排序成 scored candidates, 再喂进来。
+    // 这样下游只需要维护一套 heuristic 主体, 不必同时兼容"有序 scored 输入"和"无序 index 集合"。
+    pub fn select_neighbors_heuristic(
+        &mut self,
+        scored_candidates: &[(usize, f32)],
+        query: &Vector,
+        max_neighbors_to_select: usize,
         level: usize,
         _extend_candidates: bool,
         keep_pruned_connections: bool,
     ) -> Vec<usize> {
-        // 大橘:
-        // 这个入口服务旧节点反向边pruning. candidate_set来自某个旧节点当前已有的邻接表,
-        // 只有index, 没有现成similarity; 而且这里需要的similarity是相对这个旧节点query重新计算的.
-        // 它和search_layer返回的"相对新插入向量的已打分候选"不是同一种分数, 不能复用.
-        workspace.reset_select_neighbor_workspace(nodes.len());
-        workspace.reset_similarity_cache(nodes.len());
+        self.workspace.reset_select_neighbor_workspace(self.nodes.len());
+        // search_layer给出的候选已经带有相对query的similarity,
+        // 这里只需装入工作堆, 再按heuristic主体筛出最终邻居.
+        self.fill_work_queue_from_scored(scored_candidates, level);
+        if extend_candidates {
+            // extendCandidates: 把当前候选在这一层的一阶邻居也并入工作堆，
+            // 用membership marks避免在线性扫描堆里查重。
+            self.extend_work_queue_from_scored(scored_candidates, query, level);
+        }
+        // 新节点选邻居时, 若heuristic丢掉了一些点, 仍允许从discard里补回直到凑满M.
+        self.take_selected_neighbors(max_neighbors_to_select, keep_pruned_connections)
+    }
 
-        for candidate_index in candidate_set.iter().copied() {
-            if nodes[candidate_index].get_neighbors().len() <= level {
+    // 把某一层的无序候选 index 集合适配成 heuristic 下游统一使用的 scored ordered sequence。
+    fn score_and_sort_level_candidates(
+        &mut self,
+        candidate_indices: &[usize],
+        query: &Vector,
+        level: usize,
+    ) -> Vec<(usize, f32)> {
+        self.workspace.reset_similarity_cache(self.nodes.len());
+
+        let mut scored_candidates = Vec::with_capacity(candidate_indices.len());
+        for candidate_index in candidate_indices.iter().copied() {
+            if self.nodes[candidate_index].get_neighbors().len() <= level {
                 continue;
             }
             let candidate_similarity = HnswIndex::get_similarity_from_workspace(
-                nodes,
-                metric,
-                workspace,
+                &self.nodes,
+                self.metric,
+                &mut self.workspace,
                 candidate_index,
                 query,
             );
-            workspace.work_heap.push((
+            scored_candidates.push((candidate_index, candidate_similarity));
+        }
+        scored_candidates.sort_by(|a, b| match b.1.partial_cmp(&a.1).unwrap() {
+            std::cmp::Ordering::Equal => a.0.cmp(&b.0),
+            other => other,
+        });
+        scored_candidates
+    }
+
+    // scored_candidates已经带有分数, 不需要再重新算一次similarity.
+    fn fill_work_queue_from_scored(&mut self, scored_candidates: &[(usize, f32)], level: usize) {
+        for &(candidate_index, candidate_similarity) in scored_candidates {
+            if self.nodes[candidate_index].get_neighbors().len() <= level {
+                continue;
+            }
+            self.workspace.work_heap.push((
                 ordered_float::NotNan::new(candidate_similarity).unwrap(),
                 Reverse(candidate_index),
             ));
+            self.workspace.mark_work_present(candidate_index);
         }
-
-        Self::select_neighbors_heuristic_from_work_heap(
-            nodes,
-            metric,
-            workspace,
-            max_neighbors_to_select,
-            keep_pruned_connections,
-        )
     }
 
-    fn select_neighbors_heuristic_from_work_heap(
-        nodes: &[HnswNode],
-        metric: Metric,
-        workspace: &mut SearchLayerWorkspace,
+    fn extend_work_queue_from_scored(
+        &mut self,
+        scored_candidates: &[(usize, f32)],
+        query: &Vector,
+        level: usize,
+    ) {
+        for &(candidate_index, _) in scored_candidates {
+            if self.nodes[candidate_index].get_neighbors().len() <= level {
+                continue;
+            }
+            let candidate_neighbors = &self.nodes[candidate_index].get_neighbors()[level];
+            for &neighbor_index in candidate_neighbors {
+                if self.workspace.work_contains(neighbor_index) {
+                    continue;
+                }
+                let neighbor_similarity = HnswIndex::get_similarity_from_workspace(
+                    &self.nodes,
+                    self.metric,
+                    &mut self.workspace,
+                    neighbor_index,
+                    query,
+                );
+                self.workspace.work_heap.push((
+                    ordered_float::NotNan::new(neighbor_similarity).unwrap(),
+                    Reverse(neighbor_index),
+                ));
+                self.workspace.mark_work_present(neighbor_index);
+            }
+        }
+    }
+
+    fn take_selected_neighbors(
+        &mut self,
         max_neighbors_to_select: usize,
         keep_pruned_connections: bool,
     ) -> Vec<usize> {
         let mut result_vec: Vec<(usize, f32)> = vec![]; // R
-        while !workspace.work_heap.is_empty() && result_vec.len() < max_neighbors_to_select {
-            let nearest_elem_in_work = workspace.work_heap.pop().unwrap();
+        while !self.workspace.work_heap.is_empty() && result_vec.len() < max_neighbors_to_select {
+            let nearest_elem_in_work = self.workspace.work_heap.pop().unwrap();
             // <相似度 ,index>
             let similarity_e_to_q = nearest_elem_in_work.0.into_inner();
             let e_index = nearest_elem_in_work.1 .0;
@@ -290,9 +329,9 @@ impl HnswIndex {
             for item in result_vec.iter() {
                 let r_index = item.0;
                 let similarity_e_to_r = distance::similarity(
-                    nodes[e_index].get_data(),
-                    nodes[r_index].get_data(),
-                    metric,
+                    self.nodes[e_index].get_data(),
+                    self.nodes[r_index].get_data(),
+                    self.metric,
                 );
                 if similarity_e_to_q <= similarity_e_to_r {
                     flag = false;
@@ -302,7 +341,9 @@ impl HnswIndex {
             if flag == true {
                 result_vec.push((e_index, similarity_e_to_q));
             } else {
-                workspace.discard_heap.push((
+                // discard_heap需要提取最近的, 需要做成大根堆.(Rust默认大根堆)
+                // 同similarity, index较小的靠前, 需要reverse.
+                self.workspace.discard_heap.push((
                     ordered_float::NotNan::new(similarity_e_to_q).unwrap(),
                     Reverse(e_index),
                 ));
@@ -310,8 +351,12 @@ impl HnswIndex {
         }
 
         if keep_pruned_connections {
-            while !workspace.discard_heap.is_empty() && result_vec.len() < max_neighbors_to_select {
-                let discard_top = workspace.discard_heap.pop().unwrap(); //while保证不会panic
+            // 对应论文里的Wd补位阶段: 当diversity heuristic筛得过严时,
+            // 允许把之前丢弃的高分候选按顺序补回, 避免结果数不足.
+            while !self.workspace.discard_heap.is_empty()
+                && result_vec.len() < max_neighbors_to_select
+            {
+                let discard_top = self.workspace.discard_heap.pop().unwrap(); //while保证不会panic
                 let discard_top_similarity = discard_top.0.into_inner();
                 let discard_top_index = discard_top.1 .0;
                 result_vec.push((discard_top_index, discard_top_similarity))
@@ -322,39 +367,5 @@ impl HnswIndex {
             .map(|(result_index, _)| *result_index)
             .collect();
         result_index_vec
-    }
-
-    fn select_neighbors_heuristic_from_scored_candidates(
-        nodes: &[HnswNode],
-        metric: Metric,
-        workspace: &mut SearchLayerWorkspace,
-        scored_candidates: &[(usize, f32)],
-        max_neighbors_to_select: usize,
-        level: usize,
-        keep_pruned_connections: bool,
-    ) -> Vec<usize> {
-        // 大橘:
-        // 这个入口服务新节点选邻居. scored_candidates来自search_layer,
-        // 已经带有相对新插入向量的similarity, 所以这里只把它们装进work_heap,
-        // 避免退回HashSet后再重新计算一遍分数. 真正的heuristic主体在from_work_heap里共用.
-        workspace.reset_select_neighbor_workspace(nodes.len());
-
-        for &(candidate_index, candidate_similarity) in scored_candidates {
-            if nodes[candidate_index].get_neighbors().len() <= level {
-                continue;
-            }
-            workspace.work_heap.push((
-                ordered_float::NotNan::new(candidate_similarity).unwrap(),
-                Reverse(candidate_index),
-            ));
-        }
-
-        Self::select_neighbors_heuristic_from_work_heap(
-            nodes,
-            metric,
-            workspace,
-            max_neighbors_to_select,
-            keep_pruned_connections,
-        )
     }
 }

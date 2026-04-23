@@ -24,6 +24,11 @@ pub struct SearchLayerWorkspace {
     pub sim_marks: Vec<u32>,  //同样的设计, 用于search_layer
     pub sim_values: Vec<f32>, //缓存相似度计算结果, 避免重复计算
 
+    // 大橘:
+    // work_membership_marks服务select_neighbors_heuristic里的W集合成员判断.
+    // work_heap负责"按相似度取当前最近", marks负责"O(1)判断某个index是否已在W里".
+    pub work_membership_epoch: u32,
+    pub work_membership_marks: Vec<u32>,
     pub work_heap: BinaryHeap<(NotNan<f32>, Reverse<usize>)>,
     pub discard_heap: BinaryHeap<(NotNan<f32>, Reverse<usize>)>,
 }
@@ -39,6 +44,8 @@ impl SearchLayerWorkspace {
             sim_marks: Vec::new(),
             sim_values: Vec::new(),
 
+            work_membership_epoch: 0,
+            work_membership_marks: Vec::new(),
             work_heap: BinaryHeap::new(),
             discard_heap: BinaryHeap::new(),
         }
@@ -72,6 +79,10 @@ impl SearchLayerWorkspace {
     }
 
     pub fn reset_select_neighbor_workspace(&mut self, node_count: usize) {
+        self.work_membership_epoch += 1;
+        if self.work_membership_marks.len() < node_count {
+            self.work_membership_marks.resize(node_count, 0);
+        }
         if self.work_heap.capacity() < node_count {
             self.work_heap.reserve(node_count);
         }
@@ -80,5 +91,13 @@ impl SearchLayerWorkspace {
         }
         self.work_heap.clear();
         self.discard_heap.clear();
+    }
+
+    pub fn work_contains(&self, index: usize) -> bool {
+        self.work_membership_marks[index] == self.work_membership_epoch
+    }
+
+    pub fn mark_work_present(&mut self, index: usize) {
+        self.work_membership_marks[index] = self.work_membership_epoch;
     }
 }

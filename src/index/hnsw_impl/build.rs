@@ -157,6 +157,7 @@ impl HnswIndex {
         }
     }
 
+    // 仅 legacy 路径仍在使用这套 simple selection；主线建图已经切到 heuristic selection。
     pub fn select_neighbors_simple(
         &mut self,
         candidate_set: &HashSet<usize>,

@@ -7,6 +7,10 @@ edition = "2021"
 name = "azusa"
 path = "src/lib.rs"
 
+[[bin]]
+name = "sift1m_benchmark"
+path = "benchmark/sift1m_benchmark.rs"
+
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

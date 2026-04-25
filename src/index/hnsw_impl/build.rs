@@ -288,7 +288,8 @@ impl HnswIndex {
         extend_candidates: bool,
         keep_pruned_connections: bool,
     ) -> Vec<usize> {
-        self.workspace.reset_select_neighbor_workspace(self.nodes.len());
+        self.workspace
+            .reset_select_neighbor_workspace(self.nodes.len());
         // search_layer给出的候选已经带有相对query的similarity,
         // 这里只需装入工作堆, 再按heuristic主体筛出最终邻居.
         self.fill_work_queue_from_scored(scored_candidates, level);

@@ -40,9 +40,7 @@ fn search_returns_id_and_score_and_get_metadata_by_id_returns_metadata() {
     assert_eq!(results[0].0, 1);
     assert!(results[0].1 >= results[1].1);
 
-    let metadata = index
-        .get_metadata_by_id(1)
-        .expect("metadata should exist");
+    let metadata = index.get_metadata_by_id(1).expect("metadata should exist");
     assert_eq!(metadata.doc_id.as_deref(), Some("doc-1"));
     assert_eq!(metadata.chunk_id.as_deref(), Some("chunk-1"));
     assert_eq!(metadata.source.as_deref(), Some("unit-test"));

@@ -4,11 +4,7 @@ use super::super::hnsw_stats::SearchLayerStats;
 use super::super::HnswIndex;
 
 impl HnswIndex {
-    fn search_top_k_candidates(
-        &mut self,
-        query: &Vector,
-        ef_search: usize,
-    ) -> Vec<(usize, f32)> {
+    fn search_top_k_candidates(&mut self, query: &Vector, ef_search: usize) -> Vec<(usize, f32)> {
         let Some(mut current_entry_index) = self.entry_node_index else {
             return Vec::new();
         };

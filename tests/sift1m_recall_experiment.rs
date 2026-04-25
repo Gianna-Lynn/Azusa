@@ -97,12 +97,8 @@ fn run_sift1m_experiment_with_reference_source(
         .expect("in function run_sift1m_experiment, load query_bytes error");
     let query_vecs = read_fvecs(&query_bytes, config.query_limit);
 
-    let reference_top_k_ids = build_reference_top_k_ids(
-        config,
-        &base_vecs,
-        &query_vecs,
-        reference_source,
-    );
+    let reference_top_k_ids =
+        build_reference_top_k_ids(config, &base_vecs, &query_vecs, reference_source);
 
     for &ef_search in config.ef_search {
         run_sift1m_eval_pass(
@@ -281,6 +277,10 @@ pub fn exact_top_k(
     if results.len() > k {
         // O(N) 操作: 将第 k 个位置的元素就位.
         // 排序规则: score 降序, score 相同则 id 升序, 保持结果可复现。
+
+        // select_nth_unstable_by 的排序规则是: 以第 k 个元素为基准, 将所有比它更 "大" 的元素放在前面, 比它更 "小" 的元素放在后面.
+        // unstable 的意思是: 对于 score 相同的元素, 它们之间的相对顺序不保证稳定.
+        // 在比较函数里加入 id 的比较, score 降序, score 相同则 id 升序, 保持结果可复现。
         results.select_nth_unstable_by(k, |a, b| match b.1.partial_cmp(&a.1).unwrap() {
             std::cmp::Ordering::Equal => a.0.cmp(&b.0),
             other => other,

@@ -110,6 +110,7 @@ fn main() {
 
     let mut benchmark_rows = Vec::new();
 
+    // 遍历每个 base_limit，准备对应规模的 base_vecs 和 ground truth 前缀，然后对每个算法跑一轮评测，收集结果行。
     for &base_limit in &config.eval.base_limits {
         let base_vecs = read_fvecs(&base_bytes, base_limit);
         let usable_ks: Vec<usize> = config
@@ -129,7 +130,9 @@ fn main() {
             continue;
         }
 
+        
         let max_k = *usable_ks.iter().max().unwrap();
+        // 这里的 reference_top_k_ids 是“每个 query 的 ground truth 前 max_k 个 id”，
         let reference_top_k_ids =
             build_reference_top_k_ids(&groundtruth_bytes, &base_vecs, &query_vecs, max_k);
 
@@ -244,6 +247,16 @@ fn build_index(base_vecs: &[Vec<f32>], build: &BuildConfig) -> HnswIndex {
     index
 }
 
+/// 执行 Flat baseline 的整条评测流程。
+///
+/// 这条路径不依赖 HNSW 索引，而是直接对 `base_vecs` 做暴力全量搜索：
+/// 1. 对每个 query 调用 `exact_top_k`，拿到前 `max_k` 个结果；
+/// 2. 把结果 id 转成 `u32`，与预先准备好的 ground truth 前缀做对比；
+/// 3. 把 recall、exact 命中数、耗时等指标累积到 `EvalAccumulator`；
+/// 4. 最后把所有 `k` 对应的累积结果转成 `BenchmarkRow`。
+///
+/// 之所以先算 `max_k`，是因为同一次搜索结果可以复用到多个 `k`，
+/// 避免为 `k=5`、`k=10` 等不同评测点重复做暴力搜索。
 fn run_flat_pass(
     base_limit: usize,
     base_vecs: &[Vec<f32>],
@@ -253,14 +266,18 @@ fn run_flat_pass(
     max_k: usize,
 ) -> Vec<BenchmarkRow> {
     let mut accumulators = vec![EvalAccumulator::default(); ks.len()];
-
+    
+    // 遍历每个 query 和它对应的 ground truth 前缀，执行暴力搜索，并把结果灌进累积器。
     for (query_vec, reference_ids) in query_vecs.iter().zip(reference_top_k_ids.iter()) {
+        // Flat baseline 的核心就是“每个 query 都在整个 base 集上做精确搜索”。
         let search_start = Instant::now();
+        // 这里直接拿到前 max_k 个结果，后面再按实际的 k 取前缀对比。
         let search_result_ids = exact_top_k(base_vecs, query_vec, max_k, Metric::L2);
         let elapsed = search_start.elapsed();
         let search_result_ids_u32: Vec<u32> =
             search_result_ids.iter().map(|(id, _)| *id as u32).collect();
 
+        // 把这次查询的结果和 ground truth 前缀对比，更新每个 k 对应的累积统计。
         update_accumulators(
             ks,
             reference_ids,
@@ -270,6 +287,7 @@ fn run_flat_pass(
         );
     }
 
+    // 搜集完所有 query 的统计信息后，再统一转成输出行。
     build_rows(
         BenchmarkAlgorithm::Flat,
         base_limit,
@@ -280,6 +298,15 @@ fn run_flat_pass(
     )
 }
 
+/// 执行 HNSW 评测流程。
+///
+/// 这条路径和 Flat baseline 的区别在于：
+/// - 搜索不是直接扫全量 base，而是调用 `hnsw_index.search_knn`；
+/// - 同一份索引会被多个 `ef_search` 重复使用，用来观察召回率和速度的权衡；
+/// - `build_time` 会被带到结果行里，方便把“建索引成本”也算进报告。
+///
+/// 这里按 `ef_search_values` 逐个跑一遍，每个 `ef_search` 都独立统计一组
+/// `EvalAccumulator`，这样最后每个 `k` 都会生成一行对应的 benchmark 结果。
 fn run_hnsw_pass(
     base_limit: usize,
     hnsw_index: &mut HnswIndex,
@@ -292,8 +319,11 @@ fn run_hnsw_pass(
 ) -> Vec<BenchmarkRow> {
     let mut rows = Vec::new();
 
+    // 遍历每个 ef_search，执行搜索并更新累积统计。每个 ef_search 都会生成一组结果行，最后一起返回。
     for &ef_search in ef_search_values {
+        // 每个 ef_search 都单独统计，避免不同搜索宽度之间互相污染。
         let mut accumulators = vec![EvalAccumulator::default(); ks.len()];
+        // 遍历每个 query 和它对应的 ground truth 前缀，执行 HNSW 搜索，并把结果灌进累积器。
         for (query_vec, reference_ids) in query_vecs.iter().zip(reference_top_k_ids.iter()) {
             let search_start = Instant::now();
             let search_result_ids = hnsw_index.search_knn(query_vec, max_k, ef_search);
@@ -301,6 +331,7 @@ fn run_hnsw_pass(
             let search_result_ids_u32: Vec<u32> =
                 search_result_ids.iter().map(|&id| id as u32).collect();
 
+            // 把这次查询的结果和 ground truth 前缀对比，更新每个 k 对应的累积统计。
             update_accumulators(
                 ks,
                 reference_ids,
@@ -308,8 +339,9 @@ fn run_hnsw_pass(
                 elapsed,
                 &mut accumulators,
             );
-        }
+        }//end for each query
 
+        // 每个 ef_search 都会生成一组结果行，最后一起返回。
         rows.extend(build_rows(
             BenchmarkAlgorithm::Hnsw,
             base_limit,
@@ -318,11 +350,22 @@ fn run_hnsw_pass(
             ks,
             accumulators,
         ));
-    }
+    }//end for each ef_search
 
     rows
+
 }
 
+/// 把单个 query 的搜索结果灌进累积器。
+///
+/// 这个函数只负责“把一次查询的观测值记账”，不做任何输出：
+/// - `valid_query_count` 累加，表示参与统计的 query 数量；
+/// - `total_search_time` 累加，后面可以算平均耗时；
+/// - `total_recall_at_k` 累加，后面再除以 query 数量得到平均 recall；
+/// - `exact_count` 记录“前 k 个结果和 ground truth 前缀完全一致”的次数。
+///
+/// 注意这里同时支持多个 `k`，所以一个 query 的结果只会被处理一次，
+/// 但会分别更新 `k=5`、`k=10` 之类不同评测点对应的累积器。
 fn update_accumulators(
     ks: &[usize],
     reference_top_k_ids: &[u32],
@@ -330,22 +373,27 @@ fn update_accumulators(
     elapsed: Duration,
     accumulators: &mut [EvalAccumulator],
 ) {
+    // 为了高效判断搜索结果里哪些 id 命中了 ground truth 前 k 个，这里把 ground truth 前 k 个 id 放进一个 HashSet。
     let reference_set_top_k: HashSet<_> = reference_top_k_ids.iter().copied().collect();
 
+    // 遍历每个 k 和对应的累积器，更新统计信息。
     for (k, accumulator) in ks.iter().copied().zip(accumulators.iter_mut()) {
-        accumulator.valid_query_count += 1;
-        accumulator.total_search_time += elapsed;
+        accumulator.valid_query_count += 1; // 这个 query 参与了统计，累加器的有效查询数加一。
+        accumulator.total_search_time += elapsed; // 这个 query 的搜索耗时累加到总耗时里。
 
+        // `search_result_ids` 可能比 k 短，所以这里只能按实际长度取前缀。
         let search_len = search_result_ids.len().min(k);
-        let search_prefix = &search_result_ids[..search_len];
-        let reference_prefix = &reference_top_k_ids[..k];
+        let search_prefix = &search_result_ids[..search_len];   // 这个地方不能直接取 k 个，因为搜索结果可能不足 k 个；但 ground truth 前缀是有保证的，直接取 k 个就行。
+        let reference_prefix = &reference_top_k_ids[..k];   // 这个地方可以直接取k个
 
+        // recall@k 的定义：搜索结果前 k 个里，有多少命中 ground truth 的前 k 个。
         let overlap_count = search_prefix
             .iter()
             .filter(|id| reference_set_top_k.contains(id))
             .count();
         accumulator.total_recall_at_k += overlap_count as f32 / k as f32;
 
+        // exact@k 表示前 k 个结果是否和 ground truth 前缀完全一致。
         let exact_at_k = search_result_ids.len() >= k && reference_prefix == search_prefix;
         if exact_at_k {
             accumulator.exact_count += 1;
@@ -353,6 +401,14 @@ fn update_accumulators(
     }
 }
 
+/// 把一组累积统计转换成最终可打印/可导出的 benchmark 行。
+///
+/// 输入的 `accumulators` 是按 `ks` 一一对应的，因此这个函数的工作就是：
+/// 1. 把每个 `k` 的总耗时、平均耗时、平均 recall、exact 次数装进 `BenchmarkRow`；
+/// 2. 为同一种算法、同一个 base_limit、同一次 build_time 生成多行结果；
+/// 3. 让上层调用者不必关心“如何从统计值拼成表格行”。
+///
+/// 这样 Flat 和 HNSW 两条路径都可以复用同一套输出结构，避免重复逻辑。
 fn build_rows(
     algorithm: BenchmarkAlgorithm,
     base_limit: usize,
@@ -361,21 +417,28 @@ fn build_rows(
     ks: &[usize],
     accumulators: Vec<EvalAccumulator>,
 ) -> Vec<BenchmarkRow> {
+    // 是基于 `ks` 和 `accumulators` 的一一对应关系，把每个 k 和它的累积统计配对起来，生成对应的结果行。
     ks.iter()
         .copied()
         .zip(accumulators.into_iter())
         .map(|(k, accumulator)| {
+            // 如果没有有效 query，避免除零；这时耗时和召回都记为默认值。
+
+            // 平均搜索时间的定义是“所有有效查询的总搜索时间除以有效查询数”，
             let avg_search_time = if accumulator.valid_query_count == 0 {
                 Duration::default()
             } else {
                 accumulator.total_search_time / accumulator.valid_query_count as u32
             };
+
+            // 平均 recall@k 的定义是“每个有效查询的 recall@k 的平均值”，
             let average_recall = if accumulator.valid_query_count == 0 {
                 0.0
             } else {
                 accumulator.total_recall_at_k / accumulator.valid_query_count as f32
             };
 
+            // 把这一行的所有信息装进 BenchmarkRow，返回给上层调用者。
             BenchmarkRow {
                 algorithm,
                 base_limit,
@@ -417,6 +480,7 @@ fn print_row(row: &BenchmarkRow) {
     );
 }
 
+// 把所有 benchmark 行写成 CSV 和 Markdown 两种格式，方便后续分析和展示。
 fn write_reports(config: &BenchmarkConfig, results: &[BenchmarkRow]) {
     let output_dir = "target/benchmark";
     fs::create_dir_all(output_dir).unwrap();
@@ -551,6 +615,15 @@ fn parse_args() -> BenchmarkConfig {
     config
 }
 
+/// 解析逗号分隔的 `usize` 列表。
+///
+/// 支持像 `--base-limits 1000,10000`、`--ks 1,5,10`、`--ef-search 60,100,300`
+/// 这样的新参数格式。
+///
+/// 解析规则比较宽松：
+/// - 允许末尾多一个逗号的空项被忽略；
+/// - 每个非空项都必须能成功解析成 `usize`，否则直接 panic；
+/// - 返回顺序与输入顺序一致，不做排序。
 fn parse_usize_list(raw: &str) -> Vec<usize> {
     raw.split(',')
         .filter(|item| !item.is_empty())
@@ -558,6 +631,19 @@ fn parse_usize_list(raw: &str) -> Vec<usize> {
         .collect()
 }
 
+/// 解析 benchmark 算法模式。
+///
+/// 新的 `--mode` 支持下面几种输入：
+/// - `flat`：只跑暴力 baseline；
+/// - `hnsw`：只跑 HNSW；
+/// - `both`：同时跑 Flat 和 HNSW；
+/// - 也支持逗号列表，比如 `flat,hnsw`，方便和别的参数保持一致。
+///
+/// 这里会做两层处理：
+/// 1. 先把字符串拆成多个 token；
+/// 2. 再把 token 映射成 `BenchmarkAlgorithm`，并在最后去重。
+///
+/// 这样可以容忍 `both,flat` 之类的重复写法，而不会影响最终执行顺序。
 fn parse_algorithms(raw: &str) -> Vec<BenchmarkAlgorithm> {
     let mut algorithms = Vec::new();
     for item in raw.split(',').filter(|item| !item.is_empty()) {

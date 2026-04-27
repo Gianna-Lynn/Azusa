@@ -8,7 +8,7 @@
 // sift_groundtruth.ivecs	标准答案（查询的真值） — 每个查询的top-k正确答案
 // 用 sift_base 建立HNSW索引
 // 用 sift_query 去查询
-// 拿结果和 sift_groundtruth 比较，计算recall@k（召回率）
+// 拿结果和 sift_groundtruth 比较，计算 top-k 重合比例和 exact@k 命中率
 
 #[path = "sift1m_test_utils.rs"]
 mod sift1m_test_utils;

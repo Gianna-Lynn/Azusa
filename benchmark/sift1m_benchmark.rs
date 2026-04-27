@@ -386,14 +386,14 @@ fn update_accumulators(
         let search_prefix = &search_result_ids[..search_len];   // 这个地方不能直接取 k 个，因为搜索结果可能不足 k 个；但 ground truth 前缀是有保证的，直接取 k 个就行。
         let reference_prefix = &reference_top_k_ids[..k];   // 这个地方可以直接取k个
 
-        // recall@k 的定义：搜索结果前 k 个里，有多少命中 ground truth 的前 k 个。
+        // recall@k 的定义：搜索结果 top-k 与 ground truth top-k 的重合比例。
         let overlap_count = search_prefix
             .iter()
             .filter(|id| reference_set_top_k.contains(id))
             .count();
         accumulator.total_recall_at_k += overlap_count as f32 / k as f32;
 
-        // exact@k 表示前 k 个结果是否和 ground truth 前缀完全一致。
+        // exact@k 表示搜索结果前 k 个 ID 是否和 ground truth 前 k 个 ID 完全一致。
         let exact_at_k = search_result_ids.len() >= k && reference_prefix == search_prefix;
         if exact_at_k {
             accumulator.exact_count += 1;

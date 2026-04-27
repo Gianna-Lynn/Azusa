@@ -4,6 +4,87 @@ use azusa::{
 };
 
 #[test]
+fn search_on_empty_index_returns_empty() {
+    let mut index = HnswIndex::new(Metric::Cosine, 0.5);
+
+    let results = index.search_knn(&vec![1.0, 0.0], 5, 8);
+    assert!(results.is_empty(), "empty index should return empty results");
+}
+
+#[test]
+fn search_with_k_larger_than_dataset_returns_all_nodes() {
+    let mut index = HnswIndex::new(Metric::Cosine, 0.5);
+
+    index.batch_insert(
+        vec![
+            VectorRecord {
+                id: 1,
+                vector: vec![1.0, 0.0],
+                metadata: Metadata::default(),
+            },
+            VectorRecord {
+                id: 2,
+                vector: vec![0.0, 1.0],
+                metadata: Metadata::default(),
+            },
+            VectorRecord {
+                id: 3,
+                vector: vec![0.5, 0.5],
+                metadata: Metadata::default(),
+            },
+        ],
+        8,
+        2,
+        4,
+    );
+
+    let results = index.search_knn(&vec![1.0, 0.0], 10, 8);
+    assert_eq!(results.len(), 3, "k should be clipped to dataset size");
+}
+
+#[test]
+#[should_panic(expected = "dimension mismatch")]
+fn search_with_empty_query_panics_dimension_mismatch() {
+    let mut index = HnswIndex::new(Metric::Cosine, 0.5);
+    index.batch_insert(
+        vec![VectorRecord {
+            id: 1,
+            vector: vec![1.0, 0.0],
+            metadata: Metadata::default(),
+        }],
+        8,
+        2,
+        4,
+    );
+
+    let _ = index.search_knn(&vec![], 1, 8);
+}
+
+#[test]
+#[should_panic(expected = "duplicate id is not allowed")]
+fn batch_insert_rejects_duplicate_ids() {
+    let mut index = HnswIndex::new(Metric::Cosine, 0.5);
+
+    index.batch_insert(
+        vec![
+            VectorRecord {
+                id: 1,
+                vector: vec![1.0, 0.0],
+                metadata: Metadata::default(),
+            },
+            VectorRecord {
+                id: 1,
+                vector: vec![0.0, 1.0],
+                metadata: Metadata::default(),
+            },
+        ],
+        8,
+        2,
+        4,
+    );
+}
+
+#[test]
 fn search_returns_id_and_score_and_get_metadata_by_id_returns_metadata() {
     let mut index = HnswIndex::new(Metric::Cosine, 0.5);
 

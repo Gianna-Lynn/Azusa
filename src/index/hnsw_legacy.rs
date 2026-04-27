@@ -53,6 +53,11 @@ impl HnswIndex {
         max_neighbors_to_keep: usize,
         level: &usize,
     ) {
+        assert!(
+            !self.id_to_index.contains_key(&id),
+            "duplicate id is not allowed: {}",
+            id
+        );
         self.records.insert(
             id,
             VectorRecord {

@@ -32,6 +32,11 @@ impl HnswIndex {
         max_neighbors_to_select: usize,
         max_neighbors_to_keep: usize,
     ) {
+        assert!(
+            !self.id_to_index.contains_key(&id),
+            "duplicate id is not allowed: {}",
+            id
+        );
         self.upsert_record(VectorRecord {
             id,
             vector: data.clone(),
@@ -55,6 +60,11 @@ impl HnswIndex {
     ) {
         let id = record.id;
         let vector = record.vector.clone();
+        assert!(
+            !self.id_to_index.contains_key(&id),
+            "duplicate id is not allowed: {}",
+            id
+        );
         self.upsert_record(record);
         self.insert_into_graph(
             id,

@@ -13,7 +13,9 @@ use crate::{
 use super::super::{HnswIndex, HnswNode, SearchLayerWorkspace};
 
 impl HnswIndex {
-    // 采样层数的函数, 满足 Probability(新节点层数level>=L) = level_sample_probability^L
+    // HNSW 会给每个新节点随机采样一个最高层级。
+    // 层级越高，节点越少；层级越低，节点越密集。
+    // 这个采样过程决定了“新节点会参与到哪些层的建图”。
     pub fn sample_level(&mut self) -> usize {
         let mut level = 0usize;
         while self.rng.gen_bool(self.level_sample_probability) {
@@ -22,7 +24,8 @@ impl HnswIndex {
         level
     }
 
-    // 入口函数1: (id, vector)作为入口, metadata先用默认值占位.这是一个简化的调用.
+    // 入口函数1: 只提供 (id, vector) 时，metadata 先用默认值占位。
+    // 这是最常见的简化插入方式。
     pub fn insert(
         &mut self,
         id: Id,
@@ -38,7 +41,8 @@ impl HnswIndex {
         }, ef_construction, max_neighbors_to_select, max_neighbors_to_keep);
     }
 
-    // 入口函数2: VectorRecord(id, vector, metadata)的入口, 用户要同时提供 metadata.
+    // 入口函数2: 直接插入完整的 VectorRecord。
+    // 这种方式适合上层已经拿到了结构化记录的场景。
     pub fn insert_record(
         &mut self,
         record: VectorRecord,
@@ -66,15 +70,16 @@ impl HnswIndex {
         );
     }
 
-    // self.records是按Id保存的原始记录, 这里提供一个store_record方法来统一管理记录的存储.
+    // records 负责保存“原始记录本体”，graph 负责保存“图结构连接”。
+    // 这里单独抽一个方法，方便以后统一调整记录存储策略。
     fn store_record(&mut self, record: VectorRecord) {
         self.records.insert(record.id, record);
     }
 
-    // 入口函数3: 批量插入, 只是循环调用单条插入的逻辑
+    // 入口函数3: 批量插入，本质上只是把单条插入循环执行一遍。
     pub fn batch_insert(
         &mut self,
-            records: Vec<VectorRecord>,
+        records: Vec<VectorRecord>,
         ef_construction: usize,
         max_neighbors_to_select: usize,
         max_neighbors_to_keep: usize,
@@ -89,7 +94,13 @@ impl HnswIndex {
         }
     }
 
-    // 真正负责把点接进 HNSW 图
+    // 真正负责把一个新点接进 HNSW 图。
+    //
+    // 这段流程可以粗略理解成四件事：
+    // 1. 给新点采样层高；
+    // 2. 从图的入口开始找到合适的局部入口点；
+    // 3. 在每一层做局部搜索并挑选邻居；
+    // 4. 双向连边后，对旧邻居做必要的剪枝。
     fn insert_node_into_graph(
         &mut self,
         id: Id,
@@ -98,7 +109,7 @@ impl HnswIndex {
         max_neighbors_to_select: usize,
         max_neighbors_to_keep: usize,
     ) {
-        // 1) 准备新节点：记录计数、采样层高、构造节点对象。
+        // 1) 准备新节点：记录这次插入、采样层高、构造节点对象。
         self.timing.calls += 1;
         let node_lvl = self.sample_level();
         let data_copy = vector.clone();
@@ -106,6 +117,7 @@ impl HnswIndex {
         let new_index = self.nodes.len();
 
         // 2) 空图特判：第一个点直接成为入口点，不需要走后续搜索和连边流程。
+        // 这一步也会成为后续所有查询/插入的起点。
         if self.is_empty() {
             self.entry_node_index = Some(new_index);
             self.index_max_level = node_lvl;
@@ -115,6 +127,7 @@ impl HnswIndex {
         }
 
         // 3) 先把新节点挂进索引表和节点数组，后续搜索和建边会用到它的 index。
+        // 先插入，再搜索，是因为后面剪枝和连边都要能从 index 直接访问这个节点。
         self.id_to_index.insert(id, new_index);
         self.nodes.push(new_node);
 
@@ -122,7 +135,8 @@ impl HnswIndex {
             .entry_node_index
             .expect("in insert, entry_node_index is none");
 
-        // 4) 如果新节点层高更低，先在更高层做贪心下探，找到合适的入口点。
+        // 4) 如果新节点层高更低，先在更高层做贪心下探，找到更接近它的入口点。
+        // 这样后续在低层做 search_layer 时，起点就不会离目标太远。
         if self.index_max_level > node_lvl {
             let t = Instant::now();
             for current_lvl in (node_lvl + 1..=self.index_max_level).rev() {
@@ -134,9 +148,13 @@ impl HnswIndex {
 
         // 5) 从新节点实际参与连接的最高层到 0 层逐层执行：
         //    search_layer -> 选邻居 -> 建双向边 -> 必要时剪枝旧邻居。
+        //
+        // 这一层循环里，“先找候选，再筛边，再连边，再剪旧边”是固定顺序。
+        // 这样既能保证新节点连到合适的位置，也能控制旧节点的度数不要无限膨胀。
         let top_connect_lvl = std::cmp::min(self.index_max_level, node_lvl);
         for current_lvl in (0..=top_connect_lvl).rev() {
             // 5.1 先在当前层做局部搜索，拿到候选点和搜索统计信息。
+            // ef_construction 越大，这一步看得越宽，通常建图质量越高，但耗时也更高。
             let t = Instant::now();
             let (search_results, sl_stats) =
                 self.search_layer(&vector, entry_point_index, current_lvl, ef_construction);
@@ -146,6 +164,10 @@ impl HnswIndex {
                 .add_search_layer_stats(t.elapsed().as_nanos(), &sl_stats);
 
             // 5.2 基于搜索结果挑选本层最终邻居。
+            // 这里走的是 heuristic selection：
+            // - 先从 search_layer 的结果出发；
+            // - 再按“不要太像已有结果”的规则过滤；
+            // - 最终得到一组更分散、更有信息量的邻居。
             let t = Instant::now();
             let selected_neighbors = self.select_neighbors_heuristic(
                 &search_results,
@@ -158,6 +180,7 @@ impl HnswIndex {
             self.timing.select_neighbors_ns += t.elapsed().as_nanos();
 
             // 5.3 把新节点和邻居互相连接起来。
+            // HNSW 的边是双向的：新节点连出去的同时，邻居也要回指向新节点。
             let t = Instant::now();
             for &neighbor_index in &selected_neighbors {
                 self.add_neighbor_to_node_at_level_by_index(new_index, neighbor_index, current_lvl);
@@ -166,6 +189,7 @@ impl HnswIndex {
             self.timing.link_ns += t.elapsed().as_nanos();
 
             // 5.4 如果旧邻居太多，就对它们做一次剪枝，保持图的稀疏性和质量。
+            // 这一步不是为了“给新点找更多边”，而是为了控制旧点的度数上限。
             let t = Instant::now();
             for &neighbor_index in &selected_neighbors {
                 let neighbor_current_connections: Vec<usize> = {
@@ -174,7 +198,7 @@ impl HnswIndex {
                         .expect("in insert, get_node_by_index cannot handle neighbor_index");
                     neighbor_node.get_neighbors()[current_lvl].clone()
                 };
-                // 如果邻居的当前连接数超过了max_neighbors_to_keep, 就对它的连接进行剪枝.
+                // 如果邻居当前层的边数超过了 max_neighbors_to_keep，就重新筛一遍。
                 if neighbor_current_connections.len() > max_neighbors_to_keep {
                     let neighbor_pruned_connections: Vec<usize> = {
                         let neighbor_data = self.nodes[neighbor_index].get_data().clone();
@@ -184,17 +208,13 @@ impl HnswIndex {
                             current_lvl,
                         );
                         // 这里是在做“旧邻居剪枝”：
-                        // 输入的 `scored_candidates` 本来就是这个旧节点当前已经拥有的邻居，
-                        // 现在只是想从这些“已存在的边”里重新挑出更值得保留的那一部分。
+                        // 输入的 `scored_candidates` 是“当前已经连上的边”，不是新搜索出来的更大候选池。
+                        // 所以这一段的目标是“从现有连接里挑出更值得保留的那一部分”。
                         //
-                        // 所以这里不能再把二阶邻居扩进来：
-                        // - 如果扩展，筛选范围就不再局限于“当前连接”，会变成重新做一次更大范围的选边；
-                        // - 剪枝阶段的目标是收缩和整理现有连接，而不是扩大候选集。
-                        //
-                        // 和上面“新节点接入图”时不同：
-                        // - 新节点那一处的候选来自 `search_layer`，只是种子；
-                        // - 还会把这些种子的邻居一起并入候选集，帮助新节点找到更好的连接；
-                        // - 所以那一处会开启 `extendCandidates = true`，而这里必须是 `false`。
+                        // 这也是为什么这里必须把 `extend_candidates` 关掉：
+                        // - 新节点接入图时，`search_layer` 的结果只是种子，还会额外扩展周边一阶邻居；
+                        // - 旧节点剪枝时，范围必须严格限制在“当前已有连接”内；
+                        // - 否则这一步就不再是剪枝，而是重新做一次更大范围的选边了。
                         self.select_neighbors_heuristic(
                             &scored_candidates,
                             &neighbor_data,
@@ -205,7 +225,7 @@ impl HnswIndex {
                         )
                     };
 
-                    // 求解出要删除的连接（即那些没有被剪枝保留的连接）
+                    // 求解出要删除的连接：也就是那些没有被剪枝保留的旧边。
                     let connections_to_remove: Vec<usize> = {
 
                         let neighbor_node = self
@@ -216,12 +236,12 @@ impl HnswIndex {
                             .iter()
                             .copied()
                             .filter(|connection_index| {
-                                !neighbor_pruned_connections.contains(connection_index)  // filter的条件是 "这个连接不在被保留的连接列表里", 即这个连接需要被删除
+                                !neighbor_pruned_connections.contains(connection_index)
                             })
                             .collect()
                     };
 
-                    // 替换邻接表, 并从neighbor和被删除连接双方同时删除这些边。
+                    // 先把邻接表替换成剪枝后的结果，再把被删掉的边从对端也同步移除。
                     let neighbor_node = self
                         .get_mut_node_by_index(neighbor_index)
                         .expect("in insert, get_mut_node_by_index cannot handle neighbor_index");
@@ -240,6 +260,7 @@ impl HnswIndex {
             self.timing.pruning_ns += t.elapsed().as_nanos();
 
             // 5.5 这一层的搜索结果里，最好的点会作为下一层的入口点。
+            // 这相当于“沿着新点附近的局部最优方向继续往下走”。
             entry_point_index = search_results
                 .first()
                 .map(|(index, _)| *index)
@@ -254,6 +275,8 @@ impl HnswIndex {
     }
 
     // 仅 legacy 路径仍在使用这套 simple selection；主线建图已经切到 heuristic selection。
+    // 它的策略很直接：把候选按相似度排序，直接取前 M 个。
+    // 这比 heuristic 更简单，但也更容易把彼此过于相近的点都选进来。
     pub fn select_neighbors_simple(
         &mut self,
         candidate_set: &HashSet<usize>,
@@ -278,6 +301,8 @@ impl HnswIndex {
         query: &Vector,
         max_neighbors_to_select: usize,
     ) -> Vec<usize> {
+        // 先把候选逐个打分，再按分数排序，最后截断为前 M 个。
+        // 这里的排序是“纯相似度排序”，没有 heuristic 的多样性过滤。
         workspace.reset_similarity_cache(nodes.len());
 
         let mut index_score_map: Vec<(usize, f32)> = candidate_set
@@ -308,23 +333,10 @@ impl HnswIndex {
     }
 
 
-    // 这是启发式邻居选择算法, 输入必须是按 similarity 排好序的 scored candidates: &[(usize, f32)].
-    //
-    // 之所以这里不直接收“裸 index 集合”, 是因为 heuristic 主体本身只关心候选的相似度顺序,
-    // 不负责重新计算分数或排序。调用方要先把候选整理成“带分数、且已排序”的形状。
-    //
-    // 在建图里它会被用在两个阶段:
-    // 1. 新节点接入图时:
-    //    - search_layer 已经直接返回 scored candidates, 可以原样喂进来;
-    //    - extend_candidates = true, 会把这些候选的一阶邻居也并入工作堆;
-    //    - 目标是从“搜索结果 + 周边局部结构”里挑出更好的新边。
-    // 2. 旧节点反向边 pruning 时:
-    //    - 先把当前邻接表重新打分并排序成 scored candidates;
-    //    - extend_candidates = false, 只在当前已有连接里重新筛边;
-    //    - 目标是收缩和整理旧边，而不是扩大候选集。
-    //
-    // 这样下游就只需要维护一套 heuristic 主体，不必同时兼容“有序 scored 输入”和“无序 index 集合”。
-        pub fn select_neighbors_heuristic(
+    // 启发式邻居选择：
+    // 输入必须是“已经按相似度排序好的候选”。
+    // 它的目标不是简单取最相似的前 M 个，而是尽量选出“相似度高、但彼此之间不要太像”的一组点。
+    pub fn select_neighbors_heuristic(
         &mut self,
         scored_candidates: &[(usize, f32)],
         query: &Vector,
@@ -335,36 +347,41 @@ impl HnswIndex {
     ) -> Vec<usize> {
         self.workspace
             .reset_neighbor_selection_workspace(self.nodes.len());
-        // 先把“已经带分数”的候选装入工作堆。
-        // 这一步不再计算 similarity，只负责把候选交给 heuristic 主体做筛选。
-        self.fill_work_queue_from_scored(scored_candidates, level);
+        // 第一步：把已经打过分、且已排好序的候选装入 work_heap。
+        // 这里不再重复算分，只负责把“种子候选”交给 heuristic 主体。
+        self.fill_work_heap_from_scored(scored_candidates, level);
         if extend_candidates {
-            // extendCandidates = true 时，把当前候选在这一层的一阶邻居也并入工作堆。
-            // 这相当于“先从种子出发，再把周边邻居一起纳入候选池”，能让新节点更容易连到更好的边。
-            // membership marks 用来避免在堆里做线性查重。
-            self.extend_work_queue_from_scored(scored_candidates, query, level);
+            // 第二步：如果需要扩展候选池，就把这些种子的“一阶邻居”也并进来。
+            // 这一步的意义是让新节点能看到更完整的局部结构，而不是只盯着 search_layer 的种子结果。
+            // membership marks 用来避免在 work_heap 里重复塞同一个 index。
+            self.extend_work_heap_from_scored(scored_candidates, query, level);
         }
-        // 从工作堆里执行 heuristic 选择:
-        // - 先按 diversity 规则筛掉“太像已有结果”的点;
-        // - 如果 keep_pruned_connections = true, 再从 discard 里补回一些高分候选，尽量凑满 M。
+        // 第三步：从 work_heap 里执行真正的 heuristic 筛选。
+        // 这里会先做多样性过滤，再根据需要从 discard_heap 里补回一些高分候选。
         self.take_selected_neighbors(max_neighbors_to_select, keep_pruned_connections)
     }
 
-    // 把某一层的无序候选 index 集合，转换成 heuristic 下游统一使用的“带分数且有序”序列。
-    // 这里会对每个候选重新计算 similarity，再按分数降序、同分按 index 升序排序。
+    // 把一层里“无序的候选 index 集合”重新打分，并整理成按分数排序的序列。
+    // 这一步主要服务于旧节点剪枝：剪枝时我们只看当前已有的连接，不额外扩展候选池。
     fn score_and_sort_level_candidates(
         &mut self,
         candidate_indices: &[usize],
         query: &Vector,
         level: usize,
     ) -> Vec<(usize, f32)> {
+        // 先逐个计算候选的相似度，再按相似度降序、同分按 index 升序排序。
         self.workspace.reset_similarity_cache(self.nodes.len());
 
         let mut scored_candidates = Vec::with_capacity(candidate_indices.len());
         for candidate_index in candidate_indices.iter().copied() {
+            // 如果这个候选在当前层不存在，就跳过。
+            // 这是一层防御性检查，主要是为了避免 helper 被未来其他路径误喂入不在该层的点。
             if self.nodes[candidate_index].get_neighbors().len() <= level {
                 continue;
             }
+
+            // 计算候选的相似度。
+            // 这里利用了 SearchLayerWorkspace 里的 sim_marks 和 sim_values 来缓存当前 epoch 内的结果，避免重复计算。
             let candidate_similarity = HnswIndex::get_similarity_from_workspace(
                 &self.nodes,
                 self.metric,
@@ -372,8 +389,12 @@ impl HnswIndex {
                 candidate_index,
                 query,
             );
+
+            // 把候选 index 和它的相似度一起放进 scored_candidates，后续统一排序。
             scored_candidates.push((candidate_index, candidate_similarity));
         }
+
+        // 这里的排序规则是：相似度降序；如果相似度相同，则 index 升序。
         scored_candidates.sort_by(|a, b| match b.1.partial_cmp(&a.1).unwrap() {
             std::cmp::Ordering::Equal => a.0.cmp(&b.0),
             other => other,
@@ -381,10 +402,12 @@ impl HnswIndex {
         scored_candidates
     }
 
-    // scored_candidates 已经带有分数，所以这里只负责把它们装入工作堆，
+    // `scored_candidates` 已经带有分数，所以这里只负责把它们装入 work_heap，
     // 不再重新计算 similarity。
-    fn fill_work_queue_from_scored(&mut self, scored_candidates: &[(usize, f32)], level: usize) {
+    fn fill_work_heap_from_scored(&mut self, scored_candidates: &[(usize, f32)], level: usize) {
         for &(candidate_index, candidate_similarity) in scored_candidates {
+            // 同样是防御性检查：当前调用路径里这些候选本来就来自该层的现有邻居，
+            // 这里保留一层保险，避免以后复用这个 helper 时误把不在该层的点塞进工作堆。
             if self.nodes[candidate_index].get_neighbors().len() <= level {
                 continue;
             }
@@ -396,14 +419,16 @@ impl HnswIndex {
         }
     }
 
-    fn extend_work_queue_from_scored(
+    fn extend_work_heap_from_scored(
         &mut self,
         scored_candidates: &[(usize, f32)],
         query: &Vector,
         level: usize,
     ) {
-        // 对每个候选，取出它在当前层的一阶邻居：
-        // 如果这个邻居还没进工作堆，就计算它的相似度并补进去。
+        // 对每个种子候选，取出它在当前层的一阶邻居。
+        // 如果某个邻居还没进入 work_heap，就计算它的相似度并补进去。
+        //
+        // 这一步的效果是把“局部图结构”也纳入候选池，而不是只看初始 search_layer 的结果。
         for &(candidate_index, _) in scored_candidates {
             if self.nodes[candidate_index].get_neighbors().len() <= level {
                 continue;
@@ -434,18 +459,26 @@ impl HnswIndex {
         max_neighbors_to_select: usize,
         keep_pruned_connections: bool,
     ) -> Vec<usize> {
-        // 这是 heuristic 的核心筛选阶段:
-        // 1. 从 work_heap 里不断取出当前最“近”的候选;
-        // 2. 如果它和已选结果太相似，就丢进 discard_heap;
-        // 3. 如果它通过了 diversity 检查，就保留下来。
+        // 这是 heuristic 的核心筛选阶段。
+        //
+        // 直观理解：
+        // - work_heap 里放的是“当前还值得考虑”的候选；
+        // - result_vec 里放的是“已经选中的邻居”；
+        // - discard_heap 里放的是“分数高，但和已选结果太像，所以先放弃”的候选。
+        //
+        // heuristic 的目标不是简单取最相似的前 M 个，而是尽量让选出来的邻居彼此更分散，
+        // 这样图的局部连边结构更丰富，后续搜索更不容易陷入一团相似点里。
         let mut result_vec: Vec<(usize, f32)> = vec![]; // R
         while !self.workspace.work_heap.is_empty() && result_vec.len() < max_neighbors_to_select {
             let nearest_elem_in_work = self.workspace.work_heap.pop().unwrap();
-            // <相似度 ,index>
+            // work_heap 的堆顶就是“当前最值得先考虑”的候选。
             let similarity_e_to_q = nearest_elem_in_work.0.into_inner();
             let e_index = nearest_elem_in_work.1 .0;
             let mut flag = true;
 
+            // 这里是 diversity 检查：
+            // 如果候选 e 和已经选中的任意邻居 r 太像，就不要把 e 直接塞进结果。
+            // 直观上就是避免“结果里一堆彼此几乎相同的点”。
             for item in result_vec.iter() {
                 let r_index = item.0;
                 let similarity_e_to_r = distance::similarity(
@@ -461,8 +494,8 @@ impl HnswIndex {
             if flag {
                 result_vec.push((e_index, similarity_e_to_q));
             } else {
-                // discard_heap需要提取最近的, 需要做成大根堆.(Rust默认大根堆)
-                // 同similarity, index较小的靠前, 需要reverse.
+                // 不能进入 result_vec 的候选，先放进 discard_heap。
+                // 如果最终凑不满 M，再从这里补回一些高分点。
                 self.workspace.discard_heap.push((
                     ordered_float::NotNan::new(similarity_e_to_q).unwrap(),
                     Reverse(e_index),
@@ -471,9 +504,8 @@ impl HnswIndex {
         }
 
         if keep_pruned_connections {
-            // 对应论文里的 Wd 补位阶段:
-            // 如果 diversity 规则把结果筛得太少，就从 discard_heap 里按顺序补回一些之前丢掉的高分候选，
-            // 这样可以避免最终邻居数不足。
+            // 如果多样性过滤把结果筛得太少，就从 discard_heap 里按顺序补回一些之前丢掉的高分候选。
+            // 这一步对应论文里常说的“从 Wd 里补位”，目的是尽量填满 M 个邻居。
             while !self.workspace.discard_heap.is_empty()
                 && result_vec.len() < max_neighbors_to_select
             {

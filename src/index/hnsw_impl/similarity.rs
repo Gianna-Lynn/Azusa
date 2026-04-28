@@ -14,9 +14,11 @@ impl HnswIndex {
         target_index: usize,
         query: &Vector,
     ) -> f32 {
+        // 先查 epoch 缓存，缓存命中直接返回
         if workspace.sim_marks[target_index] == workspace.sim_epoch {
             workspace.sim_values[target_index]
         } else {
+            // 缓存不命中, 计算相似度并更新缓存
             let target_data = nodes[target_index].get_data();
             let new_similarity = match metric {
                 Metric::L2 => distance::l2_similarity_unchecked(target_data, query),

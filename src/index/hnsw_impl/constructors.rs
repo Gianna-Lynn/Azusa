@@ -27,7 +27,7 @@ impl HnswIndex {
             workspace: SearchLayerWorkspace::new(),
         }
     }
-
+    
     pub fn print_timings(&self) {
         let total = self.timing.search_layer_ns
             + self.timing.greedy_search_ns

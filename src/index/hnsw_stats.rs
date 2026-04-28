@@ -1,11 +1,14 @@
 //! HNSW 构图和搜索阶段的耗时统计结构。
+
+// SearchLayerStats 结构体记录了 HNSW 搜索过程中每一层的循环迭代次数等统计数据，供 InsertTimings 汇总使用。
 #[derive(Debug, Default)]
 pub struct SearchLayerStats {
     pub loop_iterations: u64,
 }
 
+// InsertTimings 结构体记录了 HNSW 插入过程中各个阶段的耗时统计数据。
 #[derive(Debug, Default)]
-pub struct InsertTimings {
+pub struct InsertTimings {          
     pub greedy_search_ns: u128,
     pub search_layer_ns: u128,
     pub select_neighbors_ns: u128,

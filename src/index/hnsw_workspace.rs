@@ -78,6 +78,8 @@ impl SearchLayerWorkspace {
             self.work_membership_marks.resize(node_count, 0);
         }
         if self.work_heap.capacity() < node_count {
+            // reserve(new_capacity): 如果capacity不足new_capacity, 则扩容到new_capacity; 
+            // 否则不变. 这里预先reserve到node_count, 避免每次插入都可能触发扩容.
             self.work_heap.reserve(node_count);
         }
         if self.discard_heap.capacity() < node_count {
@@ -87,10 +89,14 @@ impl SearchLayerWorkspace {
         self.discard_heap.clear();
     }
 
+    // 在select_neighbors_heuristic里
+    // work_contains: 判断index对应的点当前是否在W集合里. 通过比较work_membership_marks[index]和work_membership_epoch来实现.
     pub fn work_contains(&self, index: usize) -> bool {
         self.work_membership_marks[index] == self.work_membership_epoch
     }
 
+    // 在select_neighbors_heuristic里
+    // mark_work_present: 将index对应的点标记为当前在W集合里. 通过将work_membership_marks[index]设置为work_membership_epoch来实现.
     pub fn mark_work_present(&mut self, index: usize) {
         self.work_membership_marks[index] = self.work_membership_epoch;
     }

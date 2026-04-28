@@ -3,10 +3,11 @@ use crate::types::{Id, Vector};
 
 #[derive(Debug, Clone)]
 pub struct HnswNode {
-    pub(crate) id: Id,  // 这里写pub(crate)是为了让同模块下的其他文件可以访问这个字段, 但模块外部无法直接访问. 
-                        // 因为我们希望用户通过HnswIndex提供的接口来访问节点数据, 而不是直接操作HnswNode.
+    // 这些字段只开放给 crate 内部的索引实现使用，外部通过 HnswIndex 的接口访问即可。
+    pub(crate) id: Id,
     pub(crate) data: Vector,
     pub(crate) node_max_level: usize,
+    // 邻接表按层存储，内层保存的是节点 index，而不是 Id。
     pub(crate) neighbors: Vec<Vec<usize>>,
 }
 
@@ -43,8 +44,8 @@ impl HnswNode {
 
     pub fn add_neighbor(&mut self, neighbor_index: usize, level_to_add: usize) {
         if level_to_add < self.neighbors.len() {
-            // 邻接表按集合语义使用: 同一层不应重复保存同一个neighbor。
-            // 先用debug_assert守住这个invariant, 后续pruning优化才能安全减少去重兜底。
+            // 这里假设上游插入/裁剪逻辑已经保证同层邻居唯一；
+            // debug_assert 只是在开发期额外检查这个不变量，帮助尽早发现重复边。
             debug_assert!(
                 !self.neighbors[level_to_add].contains(&neighbor_index),
                 "duplicate neighbor: node_id={}, neighbor_index={}, level={}",
@@ -58,7 +59,8 @@ impl HnswNode {
 
     pub fn delete_neighbor_single_direction_at_all_levels(&mut self, neighbor_index: usize) {
         for i in 0..=self.node_max_level {
-            self.neighbors[i].retain(|&idx| idx != neighbor_index); // retain: 保留满足条件的元素, 这里的条件是"idx != neighbor_index", 即删除neighbor_index
+            // retain 保留满足条件的元素；这里等价于删掉所有等于 neighbor_index 的项。
+            self.neighbors[i].retain(|&idx| idx != neighbor_index);
         }
     }
 

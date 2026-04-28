@@ -1,5 +1,4 @@
 //! 向量距离与相似度计算工具，供索引和测试复用。
-/********************************************** Distance **********************************************/
 
 use crate::types::Metric;
 
@@ -48,11 +47,13 @@ pub fn squared_euclidean_l2_distance(a: &[f32], b: &[f32]) -> f32 {
     sum
 }
 
+// 这里release不再做重复维度检查, 调用方要先保证维度一致, 以减少额外开销。
+// debug_assert 只在 debug 构建里生效, 方便开发期尽早发现维度不一致; 
+// release 构建不会保留这层检查。
+// inline: 这个函数会被频繁调用, 标记为inline可以让编译器在调用点展开函数体, 减少函数调用的开销, 提高性能。
 #[inline]
 pub(crate) fn l2_squared_unchecked(a: &[f32], b: &[f32]) -> f32 {
-    // 这里不再重复做长度检查: 调用方要先保证维度一致, 以减少热路径上的额外开销。
     debug_assert_eq!(a.len(), b.len(), "dimension mismatch");
-
     let mut sum = 0.0f32;
     for (x, y) in a.iter().zip(b.iter()) {
         let diff = x - y;

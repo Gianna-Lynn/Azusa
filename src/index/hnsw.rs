@@ -21,14 +21,14 @@ const MY_SEED: u64 = 42;
 
 #[derive(Debug)]
 pub struct HnswIndex {
-    pub(crate) nodes: Vec<HnswNode>,
-    pub(crate) records: HashMap<Id, VectorRecord>,
+    pub(crate) nodes: Vec<HnswNode>,    // nodes: 图节点,用index访问
+    pub(crate) records: HashMap<Id, VectorRecord>, //records: 用id访问, 从id映射到原始记录, 用于查询VectorRecord的(id, vector, metadata)等信息
     pub(crate) entry_node_index: Option<usize>,
-    pub(crate) index_max_level: usize,
+    pub(crate) index_max_level: usize,  // index_max_level: 当前图的最大层数, 从0开始计数
     metric: Metric,
-    pub(crate) id_to_index: HashMap<Id, usize>,
+    pub(crate) id_to_index: HashMap<Id, usize>, 
     rng: StdRng,
     level_sample_probability: f64,
     pub(crate) timing: InsertTimings,
-    workspace: SearchLayerWorkspace,
+    workspace: SearchLayerWorkspace, 
 }

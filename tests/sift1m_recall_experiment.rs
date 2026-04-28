@@ -1,3 +1,4 @@
+//! SIFT1M 召回率实验和 smoke check。
 // SIFT1M recall experiments and smoke checks.
 // 这份文件更接近小规模 benchmark / 实验脚本，不是纯粹的单元测试。
 

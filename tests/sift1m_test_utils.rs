@@ -1,3 +1,4 @@
+//! SIFT1M 实验共用的读数、评估和辅助工具。
 // Shared byte-reading helpers for SIFT1M experiment tests.
 // 这个文件提供测试辅助工具，本身不是测试入口。
 

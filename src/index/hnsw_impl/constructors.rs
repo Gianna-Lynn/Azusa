@@ -1,3 +1,4 @@
+//! HNSW 索引的构造函数与性能统计入口。
 use std::collections::HashMap;
 
 use rand::SeedableRng;

@@ -1,8 +1,10 @@
+//! HNSW 图中单个节点的内部表示。
 use crate::types::{Id, Vector};
 
 #[derive(Debug, Clone)]
 pub struct HnswNode {
-    pub(crate) id: Id,
+    pub(crate) id: Id,  // 这里写pub(crate)是为了让同模块下的其他文件可以访问这个字段, 但模块外部无法直接访问. 
+                        // 因为我们希望用户通过HnswIndex提供的接口来访问节点数据, 而不是直接操作HnswNode.
     pub(crate) data: Vector,
     pub(crate) node_max_level: usize,
     pub(crate) neighbors: Vec<Vec<usize>>,
@@ -56,7 +58,7 @@ impl HnswNode {
 
     pub fn delete_neighbor_single_direction_at_all_levels(&mut self, neighbor_index: usize) {
         for i in 0..=self.node_max_level {
-            self.neighbors[i].retain(|&idx| idx != neighbor_index);
+            self.neighbors[i].retain(|&idx| idx != neighbor_index); // retain: 保留满足条件的元素, 这里的条件是"idx != neighbor_index", 即删除neighbor_index
         }
     }
 

@@ -1,3 +1,4 @@
+//! HNSW 索引的访问器和基础查询辅助方法。
 use crate::types::{Id, Metadata, VectorRecord};
 
 use super::super::{HnswIndex, HnswNode};
@@ -53,11 +54,6 @@ impl HnswIndex {
             .map(|record| &record.metadata)
     }
 
-    pub fn get_mut_node_by_id(&mut self, target_id: Id) -> Option<&mut HnswNode> {
-        self.get_index_by_id(target_id)
-            .and_then(|idx| self.get_mut_node_by_index(idx))
-    }
-
     pub(crate) fn add_neighbor_to_node_at_level_by_index(
         &mut self,
         node_index: usize,
@@ -70,16 +66,9 @@ impl HnswIndex {
         node.add_neighbor(neighbor_index, level);
     }
 
-    pub fn add_neighbor_to_node_at_level(&mut self, node_id: Id, neighbor_id: Id, level: usize) {
-        let node_index = self
-            .get_index_by_id(node_id)
-            .expect("in add_neighbor_to_node_at_level, node_id not found");
-        let neighbor_index = self
-            .get_index_by_id(neighbor_id)
-            .expect("in add_neighbor_to_node_at_level, neighbor_id not found");
-        self.add_neighbor_to_node_at_level_by_index(node_index, neighbor_index, level);
-    }
-
+    // 同时删除node1_index和node2_index的邻居关系, 因为HNSW里邻居关系是双向的.
+    // level参数是Option类型, 如果是Some(level), 就只删除指定层的邻居关系; 
+    // 如果是None, 就删除所有层的邻居关系.
     pub(crate) fn delete_neighbor_relationship_by_index(
         &mut self,
         node1_index: usize,
@@ -103,37 +92,8 @@ impl HnswIndex {
         }
     }
 
-    pub fn delete_neighbor_relationship_at_all_levels(&mut self, node1_id: Id, node2_id: Id) {
-        self.delete_neighbor_relationship(node1_id, node2_id, None);
-    }
-
-    fn delete_neighbor_relationship(&mut self, node1_id: Id, node2_id: Id, level: Option<usize>) {
-        let node1_index = self
-            .get_index_by_id(node1_id)
-            .expect("In function delete_neighbor_relationship, node1_id not found");
-        let node2_index = self
-            .get_index_by_id(node2_id)
-            .expect("In function delete_neighbor_relationship, node2_id not found");
-        self.delete_neighbor_relationship_by_index(node1_index, node2_index, level);
-    }
-
-    pub fn delete_neighbor_relationship_at_level(
-        &mut self,
-        node1_id: Id,
-        node2_id: Id,
-        level: usize,
-    ) {
-        self.delete_neighbor_relationship(node1_id, node2_id, Some(level));
-    }
-
-    pub fn get_neighbors_at_lvl(&self, id: Id, lvl: usize) -> Vec<Id> {
-        let node_to_search = self.get_node_by_id(id).expect("get_node_by_id不存在");
-        node_to_search.get_neighbors()[lvl]
-            .iter()
-            .map(|&neighbor_idx| self.get_id_by_index(neighbor_idx))
-            .collect()
-    }
-
+    // 这个辅助函数配合借用拆分使用: select_neighbors_heuristic里需要同时持有
+    // &self.nodes 和 &mut self.workspace, 所以先把nodes单独拆出来，再通过这里读取某层邻居。
     pub(super) fn get_neighbors_at_lvl_from_parts(
         nodes: &[HnswNode],
         index: usize,

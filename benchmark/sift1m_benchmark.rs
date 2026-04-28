@@ -1,3 +1,4 @@
+//! SIFT1M benchmark harness，用于比较 flat 和 HNSW 的表现。
 use azusa::distance::similarity;
 use azusa::index::hnsw::HnswIndex;
 use azusa::types::Metric;

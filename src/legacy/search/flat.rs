@@ -1,10 +1,10 @@
-/********************************************** Search **********************************************/
-
+//! legacy 线性扫描搜索基线，主要用于 smoke test 和对照实验。
 use crate::distance::cosine_similarity;
-use crate::storage::inmemory::InMemoryVectorStore;
+use crate::legacy::storage::inmemory::InMemoryVectorStore;
 use crate::types::{SearchResult, Vector};
 
-// 这个文件是早期版本的线性扫描搜索实现，主要用于测试和基线对比。正式版本的搜索实现会放在 hnsw_impl.rs 中。
+// 早期版本的线性扫描搜索实现，主要用于测试和基线对比。
+// 它属于 legacy 路径，不是当前 HNSW 主线搜索实现。
 pub fn search_flat(store: &InMemoryVectorStore, query: &Vector, k: usize) -> Vec<SearchResult> {
     let mut results: Vec<SearchResult> = store
         .records()

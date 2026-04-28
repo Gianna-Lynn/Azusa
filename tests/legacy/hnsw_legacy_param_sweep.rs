@@ -1,3 +1,4 @@
+//! legacy HNSW 参数扫描实验。
 // Legacy parameter sweep for handcrafted HNSW experiments.
 // 这不是正式回归测试，而是保留给早期手搓数据集的参数试验脚本。
 

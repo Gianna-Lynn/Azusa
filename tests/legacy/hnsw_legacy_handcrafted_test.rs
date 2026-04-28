@@ -1,3 +1,4 @@
+//! legacy HNSW 手工构图用例测试。
 // Legacy handcrafted HNSW tests.
 // 这份文件主要验证早期手搓数据集在 legacy 实验构图路径下的行为。
 

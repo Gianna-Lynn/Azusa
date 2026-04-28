@@ -1,3 +1,4 @@
+//! HNSW 搜索和邻居选择共用的可复用工作区。
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
@@ -8,28 +9,27 @@ use ordered_float::NotNan;
 pub struct SearchLayerWorkspace {
     pub visited_epoch: u32,
     pub visited_marks: Vec<u32>, //代替visited_bool, 内含epoch轮次数, 若visited_marks[i] == epoch 表示 第i个点最后一次被访问是在第 #epoch个轮次.
-    // 大橘:
-    // Rust的BinaryHeap默认是大根堆, tuple会先比较similarity, similarity相同再比较index.
+
+    // Rust的BinaryHeap默认是大根堆, 会先比较similarity, similarity相同再比较index.
     // 如果这里直接用(NotNan<f32>, usize), 同分时会变成index大的候选先出堆.
     // candidate_heap要表达"similarity大优先, 同分index小优先", 所以把index包成Reverse<usize>.
     pub candidate_heap: BinaryHeap<(NotNan<f32>, Reverse<usize>)>,
-    // 大橘:
+
     // result_heap用于维护固定容量top-ef结果集, 最常用的操作是peek/pop当前最差结果.
     // 因此只把similarity包成Reverse<NotNan<f32>>, 让堆顶变成"similarity最小/最差"的元素.
     // 这里不把index包成Reverse<usize>: 维护阶段同分时会先pop掉index大的元素, 保留index小的元素;
     // search_layer结束后再连续pop并reverse成输出Vec, 最终就是similarity降序且同分index升序.
     pub result_heap: BinaryHeap<(Reverse<NotNan<f32>>, usize)>,
 
+    // 以下工作区变量服务相似度计算缓存.
     pub sim_epoch: u32,
-    pub sim_marks: Vec<u32>,  //同样的设计, 用于search_layer
+    pub sim_marks: Vec<u32>,  //代替sim_cache, 内含epoch轮次数, 若sim_marks[i] == epoch 表示 sim_values[i]里缓存的相似度是有效的.
     pub sim_values: Vec<f32>, //缓存相似度计算结果, 避免重复计算
 
-    // 大橘:
-    // work_membership_marks服务select_neighbors_heuristic里的W集合成员判断.
-    // work_heap负责"按相似度取当前最近", marks负责"O(1)判断某个index是否已在W里".
+    // 以下工作区变量服务邻居选择函数select_neighbors_heuristic
     pub work_membership_epoch: u32,
-    pub work_membership_marks: Vec<u32>,
-    pub work_heap: BinaryHeap<(NotNan<f32>, Reverse<usize>)>,
+    pub work_membership_marks: Vec<u32>,                        // 内含epoch轮次数, 若work_membership_marks[i] == work_membership_epoch表示 第i个点当前在W集合里.
+    pub work_heap: BinaryHeap<(NotNan<f32>, Reverse<usize>)>,   // W集合, 按相似度取当前最近的元素
     pub discard_heap: BinaryHeap<(NotNan<f32>, Reverse<usize>)>,
 }
 
@@ -51,7 +51,7 @@ impl SearchLayerWorkspace {
         }
     }
 
-    pub fn reset(&mut self, node_count: usize) {
+    pub fn reset_search_layer_workspace(&mut self, node_count: usize) {
         self.visited_epoch += 1;
 
         // resize(new_len, value): 若不够长, 扩容到new_len, 并且扩容的部分初始化value.
@@ -62,12 +62,6 @@ impl SearchLayerWorkspace {
         }
         self.candidate_heap.clear();
         self.result_heap.clear();
-
-        self.sim_epoch += 1;
-        if self.sim_marks.len() < node_count {
-            self.sim_marks.resize(node_count, 0);
-            self.sim_values.resize(node_count, 0.0);
-        }
     }
 
     pub fn reset_similarity_cache(&mut self, node_count: usize) {
@@ -78,7 +72,7 @@ impl SearchLayerWorkspace {
         }
     }
 
-    pub fn reset_select_neighbor_workspace(&mut self, node_count: usize) {
+    pub fn reset_neighbor_selection_workspace(&mut self, node_count: usize) {
         self.work_membership_epoch += 1;
         if self.work_membership_marks.len() < node_count {
             self.work_membership_marks.resize(node_count, 0);

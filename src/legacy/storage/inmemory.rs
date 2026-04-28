@@ -1,11 +1,9 @@
-use super::VectorStore;
-use crate::types::{Id, Metadata, Record, Vector};
+//! 简单的内存向量存储，配合 legacy demo 和旧测试使用。
+use crate::types::{Id, Metadata, Vector, VectorRecord};
 use serde_json;
 
-/********************************************** Storage **********************************************/
-
 pub struct InMemoryVectorStore {
-    data: Vec<Record>,
+    data: Vec<VectorRecord>,
 }
 
 impl InMemoryVectorStore {
@@ -13,7 +11,7 @@ impl InMemoryVectorStore {
         Self { data: Vec::new() }
     }
 
-    pub fn records(&self) -> &[Record] {
+    pub fn records(&self) -> &[VectorRecord] {
         &self.data
     }
 
@@ -25,17 +23,15 @@ impl InMemoryVectorStore {
 
     pub fn load(path: &str) -> Result<Self, std::io::Error> {
         let json_string = std::fs::read_to_string(path)?;
-        let data: Vec<Record> = serde_json::from_str(&json_string)?;
+        let data: Vec<VectorRecord> = serde_json::from_str(&json_string)?;
         Ok(Self { data })
     }
-}
 
-impl VectorStore for InMemoryVectorStore {
-    fn insert(&mut self, id: Id, vector: Vector) {
+    pub fn insert(&mut self, id: Id, vector: Vector) {
         if let Some(rec) = self.data.iter_mut().find(|r| r.id == id) {
             rec.vector = vector;
         } else {
-            self.data.push(Record {
+            self.data.push(VectorRecord {
                 id,
                 vector,
                 metadata: Metadata::default(),

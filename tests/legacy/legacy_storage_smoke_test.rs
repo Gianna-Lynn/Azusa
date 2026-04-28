@@ -1,3 +1,4 @@
+//! legacy 存储与 flat search 的烟雾测试。
 // Legacy storage smoke tests.
 // 这份文件保留最早期的存储/flat search 烟雾测试，不属于当前主要关注的 SIFT1M 验证路径。
 
@@ -7,9 +8,8 @@
 //     assert_eq!(2 + 2, 4);
 // }
 
-use azusa::search::flat::search_flat;
-use azusa::storage::inmemory::InMemoryVectorStore;
-use azusa::storage::VectorStore;
+use azusa::legacy::search::flat::search_flat;
+use azusa::legacy::storage::inmemory::InMemoryVectorStore;
 
 const LEGACY_STORAGE_FIXTURE_PATH: &str = "tests/legacy/fixtures/test_vectors.json";
 

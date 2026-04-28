@@ -1,3 +1,4 @@
+//! legacy 测试共用工具。
 // Shared helpers for legacy handcrafted tests.
 // 这些 helper 只服务于旧版手搓数据集测试，不属于正式测试基础设施。
 

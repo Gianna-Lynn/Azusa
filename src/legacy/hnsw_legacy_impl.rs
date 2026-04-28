@@ -1,9 +1,9 @@
+//! legacy 路径下的 HNSW 兼容辅助实现。
 // Legacy-only helpers.
 // 这个文件只服务于旧路径 / 兼容测试，不属于正式 HNSW 实现路径。
 
 use crate::types::{Id, Metadata, Vector, VectorRecord};
-
-use super::{HnswIndex, HnswNode};
+use crate::index::hnsw::{HnswIndex, HnswNode};
 
 use std::collections::HashSet;
 use std::time::Instant;
@@ -97,13 +97,8 @@ impl HnswIndex {
             let t = Instant::now();
             let (search_results, sl_stats) =
                 self.search_layer(&data, entry_point_index, current_lvl, ef_construction);
-            self.timing.search_layer_ns += t.elapsed().as_nanos();
-            self.timing.search_layer_compute_sim_ns += sl_stats.compute_sim_ns;
-            self.timing.search_layer_furthest_scan_ns += sl_stats.furthest_scan_ns;
-            self.timing.search_layer_neighbors_fetch_ns += sl_stats.neighbors_fetch_ns;
-            self.timing.search_layer_heap_pop_ns += sl_stats.heap_pop_ns;
-            self.timing.search_layer_bookkeeping_ns += sl_stats.candidate_bookkeeping_ns;
-            self.timing.search_layer_loop_iterations += sl_stats.loop_iterations;
+            self.timing
+                .add_search_layer_stats(t.elapsed().as_nanos(), &sl_stats);
 
             let result_set: HashSet<usize> = search_results
                 .iter()

@@ -1,10 +1,6 @@
+//! HNSW 构图和搜索阶段的耗时统计结构。
 #[derive(Debug, Default)]
 pub struct SearchLayerStats {
-    pub compute_sim_ns: u128,
-    pub furthest_scan_ns: u128,
-    pub neighbors_fetch_ns: u128,
-    pub heap_pop_ns: u128,
-    pub candidate_bookkeeping_ns: u128,
     pub loop_iterations: u64,
 }
 
@@ -16,10 +12,12 @@ pub struct InsertTimings {
     pub pruning_ns: u128,
     pub link_ns: u128,
     pub calls: u64,
-    pub search_layer_compute_sim_ns: u128,
-    pub search_layer_furthest_scan_ns: u128,
-    pub search_layer_neighbors_fetch_ns: u128,
-    pub search_layer_heap_pop_ns: u128,
-    pub search_layer_bookkeeping_ns: u128,
     pub search_layer_loop_iterations: u64,
+}
+
+impl InsertTimings {
+    pub fn add_search_layer_stats(&mut self, elapsed_ns: u128, stats: &SearchLayerStats) {
+        self.search_layer_ns += elapsed_ns;
+        self.search_layer_loop_iterations += stats.loop_iterations;
+    }
 }

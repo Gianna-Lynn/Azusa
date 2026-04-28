@@ -1,3 +1,4 @@
+//! HNSW 搜索过程中复用的相似度缓存辅助函数。
 use crate::distance;
 use crate::types::{Metric, Vector};
 

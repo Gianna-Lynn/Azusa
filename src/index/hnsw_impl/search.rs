@@ -1,3 +1,4 @@
+//! HNSW 索引的搜索入口与查询相关逻辑。
 use crate::types::{Id, Vector};
 
 use super::super::hnsw_stats::SearchLayerStats;
@@ -40,7 +41,8 @@ impl HnswIndex {
         assert!(ef >= 1, "ef至少为1");
 
         let mut stats = SearchLayerStats::default();
-        self.workspace.reset(self.nodes.len());
+        self.workspace.reset_search_layer_workspace(self.nodes.len());
+        self.workspace.reset_similarity_cache(self.nodes.len());
         let nodes = &self.nodes;
         let metric = self.metric;
         let workspace = &mut self.workspace;
@@ -177,8 +179,7 @@ impl HnswIndex {
         self.search_top_k_candidates(query, ef_search)
             .into_iter()
             .take(k)
-            .map(|(id, _)| id)
-            .map(|idx| self.get_id_by_index(idx))
+            .map(|(idx, _)| self.get_id_by_index(idx))
             .collect()
     }
 }

@@ -8,6 +8,10 @@ name = "azusa"
 path = "src/lib.rs"
 
 [[bin]]
+name = "legacy_demo"
+path = "src/bin/legacy_demo.rs"
+
+[[bin]]
 name = "sift1m_benchmark"
 path = "benchmark/sift1m_benchmark.rs"
 

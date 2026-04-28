@@ -1,3 +1,4 @@
+//! legacy 手工构图测试所用的固定用例数据。
 // Legacy handcrafted and synthetic HNSW experiment cases.
 // 这些 case 主要服务于早期手搓数据集测试与参数 sweep，不是正式数据集夹具。
 

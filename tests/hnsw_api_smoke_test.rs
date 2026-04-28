@@ -1,3 +1,4 @@
+//! HNSW 公共 API 的烟雾测试。
 use azusa::{
     index::hnsw::HnswIndex,
     types::{Metadata, Metric, VectorRecord},

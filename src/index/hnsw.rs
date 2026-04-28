@@ -1,3 +1,4 @@
+//! HNSW 索引的核心状态定义与文件拆分入口。
 use rand::rngs::StdRng;
 use std::collections::HashMap;
 
@@ -5,8 +6,6 @@ use crate::types::{Id, Metric, VectorRecord};
 
 #[path = "hnsw_impl.rs"]
 mod hnsw_impl;
-#[path = "hnsw_legacy.rs"]
-mod hnsw_legacy;
 #[path = "hnsw_node.rs"]
 mod hnsw_node;
 #[path = "hnsw_stats.rs"]
@@ -22,14 +21,14 @@ const MY_SEED: u64 = 42;
 
 #[derive(Debug)]
 pub struct HnswIndex {
-    nodes: Vec<HnswNode>,
-    records: HashMap<Id, VectorRecord>,
-    entry_node_index: Option<usize>,
-    index_max_level: usize,
+    pub(crate) nodes: Vec<HnswNode>,
+    pub(crate) records: HashMap<Id, VectorRecord>,
+    pub(crate) entry_node_index: Option<usize>,
+    pub(crate) index_max_level: usize,
     metric: Metric,
-    id_to_index: HashMap<Id, usize>,
+    pub(crate) id_to_index: HashMap<Id, usize>,
     rng: StdRng,
     level_sample_probability: f64,
-    timing: InsertTimings,
+    pub(crate) timing: InsertTimings,
     workspace: SearchLayerWorkspace,
 }

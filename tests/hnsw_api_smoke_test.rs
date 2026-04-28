@@ -5,6 +5,7 @@ use azusa::{
 };
 
 #[test]
+// 验证一个空索引在查询时不会报错，而是直接返回空结果。
 fn search_on_empty_index_returns_empty() {
     let mut index = HnswIndex::new(Metric::Cosine, 0.5);
 
@@ -13,6 +14,7 @@ fn search_on_empty_index_returns_empty() {
 }
 
 #[test]
+// 验证当 k 大于数据集规模时，搜索结果会自然收敛到全部节点。
 fn search_with_k_larger_than_dataset_returns_all_nodes() {
     let mut index = HnswIndex::new(Metric::Cosine, 0.5);
 
@@ -45,6 +47,7 @@ fn search_with_k_larger_than_dataset_returns_all_nodes() {
 
 #[test]
 #[should_panic(expected = "dimension mismatch")]
+// 验证空 query 会因为维度不匹配而触发 panic，避免静默返回错误结果。
 fn search_with_empty_query_panics_dimension_mismatch() {
     let mut index = HnswIndex::new(Metric::Cosine, 0.5);
     index.batch_insert(
@@ -63,6 +66,7 @@ fn search_with_empty_query_panics_dimension_mismatch() {
 
 #[test]
 #[should_panic(expected = "duplicate id is not allowed")]
+// 验证 batch_insert 会拒绝重复 id，确保索引内部主键唯一。
 fn batch_insert_rejects_duplicate_ids() {
     let mut index = HnswIndex::new(Metric::Cosine, 0.5);
 
@@ -86,6 +90,7 @@ fn batch_insert_rejects_duplicate_ids() {
 }
 
 #[test]
+// 验证搜索结果会返回 id/score，同时 metadata 也能按 id 正确取回。
 fn search_returns_id_and_score_and_get_metadata_by_id_returns_metadata() {
     let mut index = HnswIndex::new(Metric::Cosine, 0.5);
 

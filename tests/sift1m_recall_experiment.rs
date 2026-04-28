@@ -67,16 +67,19 @@ enum ReferenceSource {
 
 /**************************  测试主体  **************************/
 #[test]
+// 跑完整个 SIFT1M 召回实验集，验证 HNSW 在不同 ef_search 下的表现。
 fn test_hnsw_in_sift1m() {
     for experiment_config in SIFT1M_EXPERIMENTS {
         run_sift1m_experiment(experiment_config);
     }
 }
 
+// 按配置执行一次 SIFT1M 实验，默认使用配置里指定的 reference source。
 fn run_sift1m_experiment(config: &Sift1mExperimentConfig) {
     run_sift1m_experiment_with_reference_source(config, config.reference_source);
 }
 
+// 执行一次 SIFT1M 实验：建索引、准备 query、构造参考答案，然后逐个 ef_search 评测。
 fn run_sift1m_experiment_with_reference_source(
     config: &Sift1mExperimentConfig,
     reference_source: ReferenceSource,
@@ -112,6 +115,7 @@ fn run_sift1m_experiment_with_reference_source(
     }
 }
 
+// 为实验准备每个 query 对应的 top-k 参考答案，支持官方 ground truth 和暴力搜索两种来源。
 fn build_reference_top_k_ids(
     config: &Sift1mExperimentConfig,
     base_vecs: &[Vec<f32>],
@@ -171,6 +175,7 @@ fn build_reference_top_k_ids(
     }
 }
 
+// 对单个 ef_search 值执行一轮评估，并打印 recall / exact / 耗时等统计。
 fn run_sift1m_eval_pass(
     index: &mut HnswIndex,
     config: &Sift1mExperimentConfig,
@@ -252,8 +257,8 @@ fn run_sift1m_eval_pass(
     }
 }
 
-// 大橘: 优化函数签名与代码规范.
-// 将函数参数从 &Vec<T> 改为更通用的切片 &[T], 增强函数适用性.
+// 计算暴力精确 top-k，用作召回率评估的参考答案。
+// 参数使用切片而不是 `&Vec<T>`，让这个工具能被更通用地复用。
 pub fn exact_top_k(
     base_vecs: &[Vec<f32>],
     query: &[f32],
@@ -262,34 +267,17 @@ pub fn exact_top_k(
 ) -> Vec<(u64, f32)> {
     let mut results = Vec::with_capacity(base_vecs.len());
     for (idx, base_vec) in base_vecs.iter().enumerate() {
-        // 大橘: 优化代码规范.
-        // similarity 函数的参数是 &[f32], query 和 base_vec 可以直接传入, Rust 会自动解引用.
-        // 原: let score = similarity(&query, &base_vec , metric);
         let score = similarity(query, base_vec, metric);
         results.push((idx as u64, score));
     }
 
-    // 大橘: 优化性能.
-    // 原本是对所有结果进行 O(N log N) 的全排序, 然后取前 k 个.
-    // 当 base_vecs 很大时 (例如 SIFT1M 的 100 万), 这个开销非常大.
-    // 现改为使用 `select_nth_unstable_by`, 这是一个 O(N) 的部分排序算法,
-    // 它能保证第 k 个元素就位, 并且所有前 k 个元素都在它前面.
-    // 之后再对这 k 个元素进行一次 O(k log k) 的排序, 总体性能大幅提升.
     if results.len() > k {
-        // O(N) 操作: 将第 k 个位置的元素就位.
-        // 排序规则: score 降序, score 相同则 id 升序, 保持结果可复现。
-
-        // select_nth_unstable_by 的排序规则是: 以第 k 个元素为基准, 将所有比它更 "大" 的元素放在前面, 比它更 "小" 的元素放在后面.
-        // unstable 的意思是: 对于 score 相同的元素, 它们之间的相对顺序不保证稳定.
-        // 在比较函数里加入 id 的比较, score 降序, score 相同则 id 升序, 保持结果可复现。
         results.select_nth_unstable_by(k, |a, b| match b.1.partial_cmp(&a.1).unwrap() {
             std::cmp::Ordering::Equal => a.0.cmp(&b.0),
             other => other,
         });
-        // 截断, 只保留前面未经排序的 k 个元素.
         results.truncate(k);
     }
-    // O(k log k) 操作: 对最终的 top-k 结果进行精确排序.
     results.sort_by(|a, b| match b.1.partial_cmp(&a.1).unwrap() {
         std::cmp::Ordering::Equal => a.0.cmp(&b.0),
         other => other,
@@ -297,6 +285,7 @@ pub fn exact_top_k(
     results
 }
 
+// 用实验配置把 base 向量建成 HNSW 索引。
 fn build_index(base_vecs: &[Vec<f32>], config: HnswIndexBuildConfig) -> HnswIndex {
     let mut index = HnswIndex::new(TEST_METRIC, config.level_sample_probability);
     println!(
@@ -318,6 +307,7 @@ fn build_index(base_vecs: &[Vec<f32>], config: HnswIndexBuildConfig) -> HnswInde
 }
 
 #[test]
+// 用很小的数据规模跑一遍完整流程，作为快速回归用的 smoke test。
 fn sift1m_recall_smoke_test() {
     let smoke_config = Sift1mExperimentConfig {
         base_limit: 10,

@@ -100,20 +100,29 @@ impl Default for BenchmarkConfig {
 }
 
 fn main() {
+    // 入口函数：按配置把 SIFT1M benchmark 从“数据读取 -> 评测 -> 输出报告”完整跑一遍。
     let config = parse_args();
 
+    // 打印最终配置，方便在命令行里确认这次 benchmark 实际用了哪些参数。
     println!("{config:#?}");
 
+    // 预先把原始二进制文件读进内存，后面每个 base_limit / query_limit 都从这些字节里切片读取。
     let base_bytes = fs::read("data//sift1m//sift//sift_base.fvecs").unwrap();
     let query_bytes = fs::read("data//sift1m//sift//sift_query.fvecs").unwrap();
     let groundtruth_bytes = fs::read("data//sift1m//sift//sift_groundtruth.ivecs").unwrap();
+
+    // 只读取需要参与评测的 query 子集，避免 query_limit 较小时还去解析完整文件。
     let query_vecs = read_fvecs(&query_bytes, config.eval.query_limit);
 
+    // 这里保存所有最终结果行，最后统一导出 CSV / Markdown。
     let mut benchmark_rows = Vec::new();
 
-    // 遍历每个 base_limit，准备对应规模的 base_vecs 和 ground truth 前缀，然后对每个算法跑一轮评测，收集结果行。
+    // 外层按 base_limit 逐个评测：同一批 query 会在不同 base 规模下重复测试。
     for &base_limit in &config.eval.base_limits {
+        // 从原始 base 数据里切出当前规模的数据集。
         let base_vecs = read_fvecs(&base_bytes, base_limit);
+
+        // 过滤掉大于 base 数据规模的 k，避免后面构造 reference 或统计时越界。
         let usable_ks: Vec<usize> = config
             .eval
             .ks
@@ -131,15 +140,18 @@ fn main() {
             continue;
         }
 
-        
+        // 这次评测里真正会用到的最大 k，用它可以复用同一次搜索结果。
         let max_k = *usable_ks.iter().max().unwrap();
-        // 这里的 reference_top_k_ids 是“每个 query 的 ground truth 前 max_k 个 id”，
+
+        // 预先为每个 query 准备参考答案前缀，后面 Flat 和 HNSW 都会复用。
         let reference_top_k_ids =
             build_reference_top_k_ids(&groundtruth_bytes, &base_vecs, &query_vecs, max_k);
 
+        // 每个算法单独跑一轮，便于对比暴力基线和 HNSW 的表现。
         for &algorithm in &config.eval.algorithms {
             match algorithm {
                 BenchmarkAlgorithm::Flat => {
+                    // Flat 路径：直接暴力搜索，不依赖索引。
                     let rows = run_flat_pass(
                         base_limit,
                         &base_vecs,
@@ -154,6 +166,7 @@ fn main() {
                     benchmark_rows.extend(rows);
                 }
                 BenchmarkAlgorithm::Hnsw => {
+                    // HNSW 路径：先建索引，再在多个 ef_search 下分别测试。
                     let build_start = Instant::now();
                     let mut hnsw_index = build_index(&base_vecs, &config.build);
                     let build_time = build_start.elapsed();
@@ -182,6 +195,7 @@ fn main() {
         }
     }
 
+    // 全部评测结束后再统一写报告，避免中途多次落盘。
     write_reports(&config, &benchmark_rows);
 }
 
@@ -191,6 +205,8 @@ fn build_reference_top_k_ids(
     query_vecs: &[Vec<f32>],
     k: usize,
 ) -> Vec<Vec<u32>> {
+    // 从官方 ground truth 中提取每个 query 的前 k 个正确答案；
+    // 如果文件里的 id 超出了当前 base 子集范围，就回退到暴力精确搜索。
     let groundtruth_vecs = read_uvecs(groundtruth_bytes, query_vecs.len());
     groundtruth_vecs
         .into_iter()
@@ -212,6 +228,7 @@ fn build_reference_top_k_ids(
 }
 
 fn exact_top_k(base_vecs: &[Vec<f32>], query: &[f32], k: usize, metric: Metric) -> Vec<(u64, f32)> {
+    // 对 base 全量扫一遍，计算每个向量与 query 的相似度，并返回排序后的 top-k。
     let mut results = Vec::with_capacity(base_vecs.len());
     for (idx, base_vec) in base_vecs.iter().enumerate() {
         let score = similarity(query, base_vec, metric);
@@ -233,6 +250,7 @@ fn exact_top_k(base_vecs: &[Vec<f32>], query: &[f32], k: usize, metric: Metric) 
 }
 
 fn build_index(base_vecs: &[Vec<f32>], build: &BuildConfig) -> HnswIndex {
+    // 按给定的构建参数，把 base 向量逐条插入 HNSW 索引。
     let mut index = HnswIndex::new(Metric::L2, build.level_sample_probability);
 
     // 这里仍然假设 sift1m 的 id 就是向量下标。
@@ -457,6 +475,7 @@ fn build_rows(
 }
 
 fn print_row(row: &BenchmarkRow) {
+    // 把一条 benchmark 结果打印到终端，便于快速查看当前配置下的表现。
     println!("---");
     println!("algorithm = {}", row.algorithm.as_str());
     println!("base_limit = {}", row.base_limit);
@@ -483,6 +502,7 @@ fn print_row(row: &BenchmarkRow) {
 
 // 把所有 benchmark 行写成 CSV 和 Markdown 两种格式，方便后续分析和展示。
 fn write_reports(config: &BenchmarkConfig, results: &[BenchmarkRow]) {
+    // 将所有 benchmark 结果导出为 CSV 和 Markdown，方便后续分析和贴到文档里。
     let output_dir = "target/benchmark";
     fs::create_dir_all(output_dir).unwrap();
 
@@ -572,6 +592,7 @@ fn write_reports(config: &BenchmarkConfig, results: &[BenchmarkRow]) {
 }
 
 fn parse_args() -> BenchmarkConfig {
+    // 解析命令行参数，支持 base/query/k/ef_search/m/mode 等评测开关。
     let args: Vec<String> = env::args().skip(1).collect();
     let mut config = BenchmarkConfig::default();
 
@@ -668,26 +689,31 @@ fn parse_algorithms(raw: &str) -> Vec<BenchmarkAlgorithm> {
 }
 
 fn parse_usize(raw: &str) -> usize {
+    // 把字符串参数转成 usize，解析失败就直接 panic。
     raw.parse::<usize>().unwrap()
 }
 
 fn parse_f64(raw: &str) -> f64 {
+    // 把字符串参数转成 f64，通常用于概率或浮点型阈值。
     raw.parse::<f64>().unwrap()
 }
 
 pub fn read_u32(input: &mut &[u8]) -> u32 {
+    // 从字节流中按小端序读取一个 u32，并把读取位置向后移动 4 字节。
     let (int_bytes, rest) = input.split_at(std::mem::size_of::<u32>());
     *input = rest;
     u32::from_le_bytes(int_bytes.try_into().unwrap())
 }
 
 pub fn read_f32(input: &mut &[u8]) -> f32 {
+    // 从字节流中按小端序读取一个 f32，并把读取位置向后移动 4 字节。
     let (float_bytes, rest) = input.split_at(std::mem::size_of::<u32>());
     *input = rest;
     f32::from_le_bytes(float_bytes.try_into().unwrap())
 }
 
 pub fn read_one_fvec(input: &mut &[u8]) -> Vec<f32> {
+    // 读取一条 fvecs 向量：先读维度，再连续读出该维度个 f32。
     let dim = read_u32(input) as usize;
     let mut vec_f32: Vec<f32> = Vec::new();
     for _ in 0..dim {
@@ -701,6 +727,7 @@ pub fn read_one_fvec(input: &mut &[u8]) -> Vec<f32> {
 }
 
 pub fn read_fvecs(bytes: &[u8], limit: usize) -> Vec<Vec<f32>> {
+    // 从 fvecs 原始字节流中最多读取 limit 条向量。
     let mut input = bytes;
     let mut res: Vec<Vec<f32>> = Vec::with_capacity(limit);
     for _ in 0..limit {
@@ -717,6 +744,7 @@ pub fn read_fvecs(bytes: &[u8], limit: usize) -> Vec<Vec<f32>> {
 }
 
 pub fn read_one_uvec(input: &mut &[u8]) -> Vec<u32> {
+    // 读取一条 ivecs/uvecs 风格向量：先读维度，再连续读出该维度个 u32。
     let dim = read_u32(input) as usize;
     let mut vec_u32 = Vec::with_capacity(dim);
     for _ in 0..dim {
@@ -729,6 +757,7 @@ pub fn read_one_uvec(input: &mut &[u8]) -> Vec<u32> {
 }
 
 pub fn read_uvecs(bytes: &[u8], limit: usize) -> Vec<Vec<u32>> {
+    // 从 ivecs/uvecs 原始字节流中最多读取 limit 条向量。
     let mut input = bytes;
     let mut res = Vec::with_capacity(limit);
     for _ in 0..limit {

@@ -470,3 +470,42 @@ Experiment: `SIFT1M recall sweep for the 2026-04-22 HNSW tuning batch`
 - `recall@5` / `exact@5` 保持与前一版一致，说明这是纯性能回归修复，不影响搜索语义。
 - `ef_search=300` 的平均查询时间回落到 `522.015us`, 比之前那次 `mul_add` 版本明显更快。
 - 这份记录对应的是 4.22 当天整组 HNSW 调整的最终落点，而不是单独一个回退动作。
+
+## 2026-04-25
+
+Experiment: `SIFT1M full 1M HNSW sweep on official groundtruth`
+
+- base_limit: `1000000`
+- query_limit: `100`
+- ks: `[1, 5, 10]`
+- algorithms: `[Hnsw]`
+- sweep order: `m8_efc100` -> `m16_efc100` -> `m16_efc200` -> `m32_efc200`
+- metric: `L2`
+- command: `cargo run --release --bin sift1m_benchmark -- --mode hnsw --base-limits 1000000 --ks 1,5,10 --ef-search 60,100,300 --query-limit 100 --m 8,16,32 --ef-construction 100,200`
+- change: 这轮把 benchmark 切到全量 `1,000,000` base，并在服务器上用 `nohup` 分批跑 sweep; 前三组完成，第四组在启动点被服务器硬盘挂载故障中断
+
+### Timeline
+
+| time (Asia/Shanghai) | event |
+| --- | --- |
+| 2026-04-25 19:58:47 | sweep started |
+| 2026-04-25 20:19:49 | `m8_efc100` completed |
+| 2026-04-25 21:10:48 | `m16_efc100` completed |
+| 2026-04-25 22:28 | `m16_efc200` completed; `m32_efc200` started |
+| 2026-04-29 | server mount recovered locally, results copied back into the archive |
+
+### Sweep Summary
+
+| config | build time | `ef_search=60` recall@10 / exact@10 | `ef_search=100` recall@10 / exact@10 | `ef_search=300` recall@10 / exact@10 |
+| --- | ---: | ---: | ---: | ---: |
+| `m8_efc100` | `1251.370706978s` | `89.40% / 49/100` | `94.90% / 68/100` | `99.40% / 91/100` |
+| `m16_efc100` | `3055.649133404s` | `97.50% / 76/100` | `99.20% / 89/100` | `99.80% / 94/100` |
+| `m16_efc200` | `4668.71236162s` | `97.80% / 78/100` | `99.20% / 90/100` | `99.90% / 95/100` |
+
+### Notes
+
+- `m=16` 相比 `m=8` 的建图时间明显上升，但 recall 和 exact 也更稳，尤其是在 `ef_search=60` 的低档位下差距最明显。
+- `ef_construction=200` 进一步抬高建图成本，`m16_efc200` 的 build time 是三组里最高的一档，但查询质量也达到了当前结果里的最好水平。
+- `ef_search=300` 时三组都已经接近饱和，后两组主要改善 exact@10，而 recall@10 只剩小幅提升。
+- `m32_efc200` 只写到了启动点，没有产出完整结果；这组结果不纳入汇总表。
+- 这次 sweep 的完整原始输出保留在 `target/benchmark/sweeps/sift1m_hnsw_sweep_1m_20260425_195847/` 下的各个 `run.log`、`sift1m.csv` 和 `sift1m.md` 文件里。

@@ -21,8 +21,6 @@ def write_jsonl(output_path: Path, records: list[ChunkRecord]) -> None: # jsonl 
     # 每个 record 先变成字典
     # 再 json.dumps(...)
     # 每条后面补一个换行
-
-    # TODO: 也可以直接尝试把 write_jsonl(...) 改成 with 写法。
     
     with output_path.open("w", encoding="utf-8") as output_file: # 认为output_file是文件指针, 可以调用.write()方法. 
         # with...as的构型作用是:在这个代码块里,把文件交给output_file使用, 离开代码块时自动关闭.
@@ -57,10 +55,9 @@ def main() -> None:
             chunk_size=chunk_size, 
             overlap_size=chunk_overlap
         )
-        # chunkrec_list类型是list[ChunkRecord], 不能用append直接放进列表.
-        # TODO: 这里有更优雅的办法, 不一定非得for
-        for chunkrec in chunkrec_list:
-            chunk_list.append(chunkrec)
+        # chunkrec_list类型是list[ChunkRecord], 不能用append直接放进列表, 否则会得到"列表套列表".
+        # 用extend, 可以代替 for 循环中的逐个 append.
+        chunk_list.extend(chunkrec_list)
 
     write_jsonl(chunk_output_path, chunk_list)
 

@@ -1,0 +1,12 @@
+[project]
+# 当前最小RAG启动项目的基本信息
+name = "azusa-rag"
+version = "0.0.1"
+description = "The minimal RAG bootstrap of Azusa"
+requires-python = ">=3.11"
+dependencies = []
+
+[build-system]
+# 这个块告诉Python打包工具: 我使用哪一套构建后端
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"

@@ -11,11 +11,10 @@ from .config import RAW_DATA_DIR, CHUNK_OUTPUT_PATH, CHUNK_SIZE, CHUNK_OVERLAP
 from .loaders import load_documents
 import json
 
-
-
-# TODO: 改成精确导入
-
 def write_jsonl(output_path: Path, records: list[ChunkRecord]) -> None: # jsonl 的意思是：JSON Lines, 也就是：一行一个 JSON 对象, 不是一个大列表
+    """
+    把records里每个ChunkRecord对象都写成一行JSON, 输出到output_path指定的文件里.
+    """
     # 打开输出文件
     # 循环 records
     # 每个 record 先变成字典

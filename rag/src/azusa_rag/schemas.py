@@ -11,8 +11,8 @@ class ChunkRecord:      # 定义chunk metadata
     chunk_id: str       # 这是这份文档的第几块(放在chunk名中)
     chunk_index: int    # 这个chunk是这份文档的第几个(用于程序检索)
     source: str         # 原始来源, 比如文件名 filename.txt
+    page: Optional[int] # 给PDF预留页码, txt下可以是None
     text: str           # 这个chunk的正文内容
-    page: Optional[int] = None  # 给PDF预留页码, txt下可以是None
     # TODO:
     # 补充start_char, end_char, 用于更精确的原文定位
 
@@ -26,10 +26,9 @@ class EmbeddingRecord:
     chunk_id: str       # 这是这份文档的第几块(放在chunk名中)
     chunk_index: int    # 这个chunk是这份文档的第几个(用于程序检索)
     source: str         # 原始来源, 比如文件名 filename.txt
+    embedding: list[float]   # 使用(专用的小型编码)模型编码出来的向量
+    page: Optional[int] # 给PDF预留页码, txt下是None. # 注意带有默认值的可选字段需要放在必填字段的后面
     text: str           # 这个chunk的正文内容
-    embedding: list[float]  
-    page: Optional[int] = None  # 给PDF预留页码, txt下可以是None. # 注意带有默认值的可选字段需要放在必填字段的后面
-
     
     def to_dict(self) -> dict:  # 本方法可以把EmbeddingRecord这个对象变成普通字典, 字典适合json.dumps(...)
         return asdict(self)

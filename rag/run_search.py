@@ -13,7 +13,7 @@ from pathlib import Path
 from azusa_rag.config import EMBEDDING_OUTPUT_PATH, OUTPUT_DIR
 from azusa_rag.loaders import load_embedding_records
 from azusa_rag.schemas import EmbeddingRecord
-from azusa_rag.search import get_query, search
+from azusa_rag.search import get_query, search, search_hybrid_with_sources
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -21,7 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
     统一定义命令行参数, 避免把 mode / top_k 写死在代码里.
     """
     parser = argparse.ArgumentParser(description="Run Azusa RAG search")
-    parser.add_argument("--mode", choices=["brute", "hnsw"], default="hnsw")
+    parser.add_argument("--mode", choices=["brute", "hnsw", "hybrid"], default="hnsw")
     parser.add_argument("--top-k", type=int, default=3)
     parser.add_argument("--output-name", default="search_result")
     return parser
@@ -42,6 +42,7 @@ def build_result_dict(
     mode: str,
     top_k: int,
     result_records: list[EmbeddingRecord],
+    source_dict_list: list[dict] | None = None,
 ) -> dict:
     """
     把搜索结果整理成结构化字典, 方便后续写入 JSON 或做模式对比.
@@ -49,19 +50,21 @@ def build_result_dict(
     result_items = []
 
     for rank, record in enumerate(result_records, start=1):
-        result_items.append(
-            {
-                "rank": rank,
-                "mode": mode,
-                "doc_id": record.doc_id,
-                "chunk_id": record.chunk_id,
-                "source": record.source,
-                "chunk_index": record.chunk_index,
-                "page": record.page,
-                "preview": make_preview(record.text),
-                "full_text": record.text,
-            }
-        )
+        result_item = {
+            "rank": rank,
+            "mode": mode,
+            "doc_id": record.doc_id,
+            "chunk_id": record.chunk_id,
+            "source": record.source,
+            "chunk_index": record.chunk_index,
+            "page": record.page,
+            "preview": make_preview(record.text),
+            "full_text": record.text,
+        }
+        if source_dict_list is not None:
+            result_item["retrieval_source"] = source_dict_list[rank - 1]["source"]
+        
+        result_items.append(result_item)
 
     return {
         "query": query,
@@ -102,18 +105,31 @@ def main() -> None:
     query = get_query()
     embedding_records = load_embedding_records(EMBEDDING_OUTPUT_PATH)
 
-    result_records = search(
-        query=query,
-        embedding_records=embedding_records,
-        top_k=args.top_k,
-        mode=args.mode,
-    )
+    if args.mode == "hybrid":
+        merged_ids, source_map = search_hybrid_with_sources(
+            query=query,
+            embedding_records=embedding_records,
+            top_k=args.top_k,
+        )
+        result_records = []
+        for merged_id in merged_ids:
+            result_records.append(embedding_records[merged_id])
+    
+    else: 
+        source_map = None
+        result_records = search(
+            query=query,
+            embedding_records=embedding_records,
+            top_k=args.top_k,
+            mode=args.mode,
+        )
 
     result_dict = build_result_dict(
         query=query,
         mode=args.mode,
         top_k=args.top_k,
         result_records=result_records,
+        source_dict_list = source_map
     )
 
     print_results(result_dict)

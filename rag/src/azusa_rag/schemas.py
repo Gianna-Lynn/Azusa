@@ -22,6 +22,7 @@ class ChunkRecord:      # 定义chunk metadata
 @dataclass
 class EmbeddingRecord:
     # 先暂时直接复用上面的ChunkRecord
+    # EmbeddingRecord是一个dataclass, 需要用".'访问字段, 不是用"[]"访问字段
     doc_id: str         # 这段chunk属于哪一份文档
     chunk_id: str       # 这是这份文档的第几块(放在chunk名中)
     chunk_index: int    # 这个chunk是这份文档的第几个(用于程序检索)

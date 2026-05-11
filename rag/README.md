@@ -55,6 +55,24 @@ python -m azusa_rag.main
 python -m azusa_rag.embed_main
 ```
 
+# 检索前提
+
+- 如果要跑 `mode="hnsw"` 的检索, 需要先在仓库根目录启动 `azusa_server`
+- `azusa_server` 当前使用的是内存索引, 服务重启后索引会清空
+- 如果换了一批新的 `embedding.jsonl` / 新的数据集, 请先重启 `azusa_server`, 再重新跑 HNSW 检索, 避免旧索引和当前 Python 侧记录错位
+- 当前最小命令示例:
+
+```powershell
+cd F:\Repositories\Azusa
+cargo run --bin azusa_server
+```
+
+```powershell
+cd F:\Repositories\Azusa\rag
+$env:PYTHONPATH='src'
+python run_search.py --mode hnsw --top-k 3
+```
+
 # 输出结果
 - 输出文件：`output/chunks.jsonl`
 - 每行一个 JSON 对象，包含：

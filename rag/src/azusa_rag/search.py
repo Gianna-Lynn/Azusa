@@ -129,11 +129,19 @@ def ensure_hnsw_index_loaded(embedding_records: list[EmbeddingRecord]) -> None:
         response_data = json.loads(response_json)
     record_count = response_data["record_count"]
     
-    # 如果 record_count > 0,  已经有数据, 就不重复插入.
-    # TODO: 此处默认假设server里有的数据就是这次要搜索的那批数据.如果之前插入过其他的数据,那么就会跳过插入.
-    #       如果测试规模庞大,但是要搜索的范围大致不变, 可以考虑预加载, 提前把编码完毕的数据库向量都存在硬盘上, 要调用的时候读入内存.
-    if record_count > 0:
+    # 最小安全策略:
+    # - record_count == 0: server 还是空索引, 继续走后面的逐条插入;
+    # - record_count == len(embedding_records): 暂时认为 server 里大概率已经是当前这批数据;
+    # - 其他情况: 不静默复用旧索引, 直接报错提醒先重启 azusa_server.
+    #
+    # 这样至少能把“旧索引混进新数据集”的问题从静默错位, 改成显式报错.
+    if record_count == len(embedding_records):
         return
+    if record_count != 0:
+        raise ValueError(
+            "Azusa server already contains a different in-memory index. "
+            "Please restart azusa_server before loading a new embedding dataset."
+        )
     # record_count == 0，就逐条 /insert
 
     for index, embedding_record in enumerate(embedding_records):

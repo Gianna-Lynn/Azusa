@@ -9,6 +9,12 @@
 
 当前服务是内存版 HNSW demo，适合验证「插入 -> 搜索 -> 取回记录」链路。
 
+## 使用约束
+
+- 当前 `azusa_server` 只维护一份内存索引，不区分“这是哪一批数据”
+- 如果你要切换到一批新的 embedding 数据，请先重启 `azusa_server`
+- 否则 Python 侧当前的 `embedding_records` 和 Rust 侧已有索引可能不是同一批，后续按 `id` 回查时就会错位
+
 ## 启动服务
 
 在第一个 PowerShell 终端，从仓库根目录启动服务：

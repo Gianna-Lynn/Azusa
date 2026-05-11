@@ -14,6 +14,17 @@ Azusa是一个基于HNSW (Hierarchical Navigable Small World, 分层可导航小
 
 在SIFT1M全量1M向量上进行建图和搜索, 并利用官方groundtruth验证正确性.
 
+仓库内还补了一条最小 RAG 检索链路, 当前已经支持:
+
+- `raw txt -> chunks.jsonl -> embedding.jsonl`
+- Python 侧 `brute` / Rust HTTP `hnsw` 两种检索模式
+- 一个最小 `hybrid` 骨架, 能合并 dense 与 sparse 结果, 并给结果标注来源
+
+相关文档:
+
+- RAG 子项目说明见 `rag/README.md`
+- HTTP 服务接口说明见 `docs/azusa_server_readme.md`
+
 ## HNSW原理
 
 建立一个分层图, 从高层开始向低层搜索. 高层点的分布较为稀疏, 而且点距也很远. 低层点的分布则较为密集. 在高层可以快速跳转寻找最近似的搜索方向, 在低层可以深入到局部仔细搜索.,

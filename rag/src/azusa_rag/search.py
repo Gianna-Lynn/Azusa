@@ -16,6 +16,57 @@ from .embedder import embed_text_list
 import json
 import urllib.request
 
+
+def read_json_response(response) -> dict:
+    """
+    把 HTTP 响应体读出来, 并解析成 Python 字典.
+    """
+    response_body: bytes = response.read()
+    response_json = response_body.decode("utf-8")
+    response_data = json.loads(response_json)
+    return response_data
+
+
+def get_json(url: str) -> dict:
+    """
+    对给定 URL 发 GET 请求, 返回解析后的 JSON 字典.
+    """
+    with urllib.request.urlopen(url) as response:
+        return read_json_response(response)
+
+
+def post_json(url: str, request_dict: dict) -> dict:
+    """
+    对给定 URL 发 JSON POST 请求, 返回解析后的 JSON 字典.
+    """
+    request_json = json.dumps(request_dict, ensure_ascii=False)
+    request_body = request_json.encode("utf-8")
+    request = urllib.request.Request(
+        url=url,
+        data=request_body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request) as response:
+        return read_json_response(response)
+
+
+def post_json_no_response(url: str, request_dict: dict) -> None:
+    """
+    对给定 URL 发 JSON POST 请求, 但不读取业务返回值.
+    用于 /insert 这类只关心状态码的接口.
+    """
+    request_json = json.dumps(request_dict, ensure_ascii=False)
+    request_body = request_json.encode("utf-8")
+    request = urllib.request.Request(
+        url=url,
+        data=request_body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request) as response:
+        response.status
+
 def get_query()->str:
     """
     最简化的得到query str的函数.仅取目录中所有txt文件读取得到的第一个str
@@ -41,7 +92,7 @@ def dot_product(vec1: list[float], vec2: list[float]) -> float:
         ans += elem1 * elem2
     return ans
 
-def embedvecs_to_searchvecs(embedding_record_list: list[EmbeddingRecord])-> list[tuple[int, list[float]]]:
+def build_search_vecs(embedding_record_list: list[EmbeddingRecord])-> list[tuple[int, list[float]]]:
     """
     把EmbeddingRecord列表变成(id, vector)列表
     """
@@ -85,36 +136,47 @@ def search_core_hnsw(query_vec: list[float], search_vecs: list[tuple[int, list[f
         "ef_search" : 16,
     }
 
-    # 2. json.dumps(...)转换为一个json行
-    request_json = json.dumps(request_dict, ensure_ascii=False) # dumps返回str
-    # HTTP发送前通常要求把字符串变成bytes
-    request_body = request_json.encode("utf-8") # bytes
+    # 2. 调用 HTTP helper，把 query vector 送到 azusa_server 的 /search
+    # 按照azusa_server的search_handler, 返回的是 Json<SearchResponse>
+    # SearchResponse 的 JSON 形状是: {"results": [{"id": 3, "score": 0.982}, ...]}
+    response_data = post_json(SEARCH_URL, request_dict)
 
-    # 3. POST 到 http://127.0.0.1:3000/search
-
-    # 构造一个request对象, 告诉Python下面的信息:
-    request = urllib.request.Request(
-        url = SEARCH_URL,   # 目标URL
-        data = request_body,                    # 请求体
-        headers = {"Content-Type": "application/json"}, # 请求头里带有这些内容
-        method = "POST",                        # 请求方法
-    )
-    
-    # 4. 读回响应 JSON
-    with urllib.request.urlopen(request) as response: # urlopen返回_UrlopenRet, 是一个HTTP响应对象 
-          # 按照azusa_server的search_handler, 返回的是 Json<SearchResponse>
-          # SearchResponse 的 JSON 形状是: {"results": [{"id": 3, "score": 0.982}, ...]}
-          response_body: bytes = response.read() # bytes, 形如：b'{"results":[{"id":3,"score":0.982},{"id":7,"score":0.961},{"id":1,"score":0.933}]}'
-          response_json = response_body.decode("utf-8") # 把 bytes 解码成 Python 字符串(str), 形如 '{"results":[{"id":3,"score":0.982},{"id":7,"score":0.961},{"id":1,"score":0.933}]}'(备注:这是纯文本, 是纯文本, str)
-          response_data = json.loads(response_json) # 把 JSON 字符串 str 解析成 Python 内置对象dict, 形如 {"results":[{"id":3,"score":0.982},{"id":7,"score":0.961},{"id":1,"score":0.933}]}
-
-    # 5. 提取 results 里的 id    
+    # 3. 提取 results 里的 id
     score_id_list = []
     for hit in response_data["results"]:
         score_id_list.append(hit["id"])
 
-    # 6. 返回 list[int]
+    # 4. 返回 list[int]
     return score_id_list
+
+def ts030_sparse_score(query: str, text: str) -> int:
+    """
+    给一个 query 和一个 text，返回一个整数分数，表示它们有多少关键词重合。
+    """
+    query_lower = query.lower() # str(全小写)
+    text_lower = text.lower() # str(全小写)
+    # query_lower = query_lower.split() # 用空格切词, 得到 list[str]
+    # text_lower = text_lower.split() # list[str]
+    # query_set = set(query_lower) # 转成集合
+    # text_set = set(text_lower)
+    # cross_set = query_set & text_set  # 求交集, 算交集大小
+    # return len(cross_set)
+    query_lines = query_lower.splitlines()  # list[str]
+    query_fragments = []
+    for line in query_lines:
+        line = line.strip()
+        if not line:
+            continue
+        query_fragments.append(line)
+    
+    score = 0
+    for query_fragment in query_fragments:   # 检查query里面的关键句子是不是在chunk文本中出现过
+        if query_fragment in text_lower:  # 只要 query_fragment 是 text_lower 的一个子串, 就加分
+            score += 1
+    # TODO:
+    # 目前需要query_fragment是text_lower中的子串才能加分, 需要原样出现, 过于严格. 可以把query_fragment进一步往下切分.
+    
+    return score
 
 def ts030_search_sparse(query: str, embedding_records_list : list[EmbeddingRecord], top_k = 3) -> list[int]:
     """
@@ -164,18 +226,56 @@ def ts030_hybrid_merge(dense_ids: list[int], sparse_ids: list[int], top_k: int) 
         seen_ids.add(sparse_id)
 
     return merged_ids[:top_k]
-    
+
+def ts030_build_source_map(
+    merged_ids: list[int],
+    dense_ids: list[int],
+    sparse_ids: list[int],
+) -> list[dict]:
+    dense_ids_set = set(dense_ids)
+    sparse_ids_set = set(sparse_ids)
+    source_items = []
+    for merged_id in merged_ids:
+        if merged_id in dense_ids_set and merged_id in sparse_ids_set:
+            source = "dense + sparse"
+        elif merged_id in dense_ids_set:
+            source = "dense"
+        else: 
+            source = "sparse"
+        source_items.append(
+            {
+                "id": merged_id,
+                "source": source,
+            }
+        )
+    return source_items
+
+def ts030_search_hybrid_with_sources(
+    query: str,
+    embedding_records: list[EmbeddingRecord],
+    top_k: int,
+) -> tuple[list[int], list[dict]]:
+    """
+    hybrid专用的helper:
+    返回dense和sparse搜索结果merge后的id列表, 返回每条结果的来源标记.
+    """
+    query_vec = embed_query(query)
+    search_vecs = build_search_vecs(embedding_records)
+    ensure_hnsw_index_loaded(embedding_records)
+    dense_ids =  search_core_hnsw(query_vec, search_vecs, top_k)
+    sparse_ids = ts030_search_sparse(query, embedding_records, top_k)
+    merged_ids = ts030_hybrid_merge(dense_ids, sparse_ids, top_k)
+    source_map = ts030_build_source_map(merged_ids, dense_ids, sparse_ids)
+    return merged_ids, source_map
+
 def ensure_hnsw_index_loaded(embedding_records: list[EmbeddingRecord]) -> None:
     """
     确保 Rust Hnsw 中已经有数据了.
     """
     # 先请求 /health
-    with urllib.request.urlopen(HEALTH_URL) as response:
-        # 按照azusa_server的health_handler, 返回的是 Json<HealthResponse>
-        # Json<HealthResponse> 形如:  {"status":"ok","record_count":0}
-        response_body: bytes = response.read()
-        response_json = response_body.decode("utf-8")
-        response_data = json.loads(response_json)
+    # 按照azusa_server的health_handler, 返回的是 Json<HealthResponse>
+    # Json<HealthResponse> 形如:  {"status":"ok","record_count":0}
+    response_data = get_json(HEALTH_URL)
     record_count = response_data["record_count"]
     
     # 最小安全策略:
@@ -194,38 +294,16 @@ def ensure_hnsw_index_loaded(embedding_records: list[EmbeddingRecord]) -> None:
     # record_count == 0，就逐条 /insert
 
     for index, embedding_record in enumerate(embedding_records):
-        
         # 和上面的search逻辑基本一致:
         # 1. 组一个 dict
         # index 是 id
         # embedding_record是数据本体
-        insert_dict = embedding_record_to_azusa_insert_record(embedding_record=embedding_record, record_id=index)
-        
-        # 2. json.dumps(...)转换为一个json行
-        insert_json = json.dumps(insert_dict, ensure_ascii=False) # dumps返回str
-        # HTTP发送前通常要求把字符串变成bytes
-        insert_body = insert_json.encode("utf-8") # bytes
+        insert_dict = build_insert_record(embedding_record=embedding_record, record_id=index)
 
-        # 3. POST 到 http://127.0.0.1:3000/insert
+        # 2. 调用 HTTP helper，把这条记录送进 azusa_server
+        post_json_no_response(INSERT_URL, insert_dict)
 
-        # 构造一个request对象, 告诉Python下面的信息:
-        request = urllib.request.Request(
-            url = INSERT_URL,   # 目标URL
-            data = insert_body,                    # 请求体
-            headers = {"Content-Type": "application/json"}, # 请求头里带有这些内容
-            method = "POST",                        # 请求方法
-        )
-
-        # 4. 读回响应 JSON
-        with urllib.request.urlopen(request) as response: # urlopen返回_UrlopenRet, 是一个HTTP响应对象 
-            # # 按照azusa_server的search_handler, 返回的是 Json<SearchResponse>
-            # # SearchResponse 的 JSON 形状是: {"results": [{"id": 3, "score": 0.982}, ...]}
-            # response_body: bytes = response.read() # bytes, 形如：b'{"results":[{"id":3,"score":0.982},{"id":7,"score":0.961},{"id":1,"score":0.933}]}'
-            # response_json = response_body.decode("utf-8") # 把 bytes 解码成 Python 字符串(str), 形如 '{"results":[{"id":3,"score":0.982},{"id":7,"score":0.961},{"id":1,"score":0.933}]}'(备注:这是纯文本, 是纯文本, str)
-            # response_data = json.loads(response_json) # 把 JSON 字符串 str 解析成 Python 内置对象dict, 形如 {"results":[{"id":3,"score":0.982},{"id":7,"score":0.961},{"id":1,"score":0.933}]}
-            response.status
-
-def embedding_record_to_azusa_insert_record(
+def build_insert_record(
     embedding_record: EmbeddingRecord,
     record_id: int,
 ) -> dict:
@@ -265,82 +343,6 @@ def embedding_record_to_azusa_insert_record(
         },
     }
 
-def ts030_sparse_score(query: str, text: str) -> int:
-    """
-    给一个 query 和一个 text，返回一个整数分数，表示它们有多少关键词重合。
-    """
-    query_lower = query.lower() # str(全小写)
-    text_lower = text.lower() # str(全小写)
-    # query_lower = query_lower.split() # 用空格切词, 得到 list[str]
-    # text_lower = text_lower.split() # list[str]
-    # query_set = set(query_lower) # 转成集合
-    # text_set = set(text_lower)
-    # cross_set = query_set & text_set  # 求交集, 算交集大小
-    # return len(cross_set)
-    query_lines = query_lower.splitlines()  # list[str]
-    query_fragments = []
-    for line in query_lines:
-        line = line.strip()
-        if not line:
-            continue
-        query_fragments.append(line)
-    
-    score = 0
-    for query_fragment in query_fragments:   # 检查query里面的关键句子是不是在chunk文本中出现过
-        if query_fragment in text_lower:  # 只要 query_fragment 是 text_lower 的一个子串, 就加分
-            score += 1
-    # TODO:
-    # 目前需要query_fragment是text_lower中的子串才能加分, 需要原样出现, 过于严格. 可以把query_fragment进一步往下切分.
-    
-    return score
-
-def ts030_build_source_map(
-    merged_ids: list[int],
-    dense_ids: list[int],
-    sparse_ids: list[int],
-) -> list[dict]:
-    dense_ids_set = set(dense_ids)
-    sparse_ids_set = set(sparse_ids)
-    source_items = []
-    for merged_id in merged_ids:
-        is_dense_id = False
-        is_sparse_id = False
-        if merged_id in dense_ids_set:
-            is_dense_id = True
-        if merged_id in sparse_ids_set:
-            is_sparse_id = True
-        if is_dense_id and is_sparse_id:
-            source = "dense + sparse"
-        elif is_dense_id:
-            source = "dense"
-        else: 
-            source = "sparse"
-        source_items.append(
-            {
-                "id": merged_id,
-                "source": source,
-            }
-        )
-    return source_items
-
-def search_hybrid_with_sources(
-    query: str,
-    embedding_records: list[EmbeddingRecord],
-    top_k: int,
-) -> tuple[list[int], list[dict]]:
-    """
-    hybrid专用的helper:
-    返回dense和sparse搜索结果merge后的id列表, 返回每条结果的来源标记.
-    """
-    query_vec = embed_query(query)
-    search_vecs = embedvecs_to_searchvecs(embedding_records)
-    ensure_hnsw_index_loaded(embedding_records)
-    dense_ids =  search_core_hnsw(query_vec, search_vecs, top_k)
-    sparse_ids = ts030_search_sparse(query, embedding_records, top_k)
-    merged_ids = ts030_hybrid_merge(dense_ids, sparse_ids, top_k)
-    source_map = ts030_build_source_map(merged_ids, dense_ids, sparse_ids)
-    return merged_ids, source_map
-
 
 def search(query: str, embedding_records: list[EmbeddingRecord],top_k: int, mode="brute"):
     """
@@ -349,7 +351,7 @@ def search(query: str, embedding_records: list[EmbeddingRecord],top_k: int, mode
     # query -> query_vector
     query_vec = embed_query(query=query) # list[float]
     # embedding_records -> search_vectors
-    search_vecs = embedvecs_to_searchvecs(embedding_record_list=embedding_records)
+    search_vecs = build_search_vecs(embedding_record_list=embedding_records)
     # 调检索核，拿回 top-k id
     if mode == "brute":
         top_k_list = search_core_brute(query_vec=query_vec, search_vecs=search_vecs, top_k=top_k)
@@ -358,7 +360,7 @@ def search(query: str, embedding_records: list[EmbeddingRecord],top_k: int, mode
         ensure_hnsw_index_loaded(embedding_records)
         top_k_list = search_core_hnsw(query_vec=query_vec, search_vecs=search_vecs, top_k=top_k)
     elif mode == "hybrid":
-        top_k_list , source_dict_list = search_hybrid_with_sources(query, embedding_records, top_k)
+        top_k_list, _ = ts030_search_hybrid_with_sources(query, embedding_records, top_k)
     else:
         raise ValueError("Search mode must be brute, hnsw, or hybrid")
     # 用 id 回查原始 EmbeddingRecord

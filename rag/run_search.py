@@ -13,7 +13,7 @@ from pathlib import Path
 from azusa_rag.config import EMBEDDING_OUTPUT_PATH, OUTPUT_DIR
 from azusa_rag.loaders import load_embedding_records
 from azusa_rag.schemas import EmbeddingRecord
-from azusa_rag.search import get_query, search, search_hybrid_with_sources
+from azusa_rag.search import get_query, search, ts030_search_hybrid_with_sources
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -106,7 +106,7 @@ def main() -> None:
     embedding_records = load_embedding_records(EMBEDDING_OUTPUT_PATH)
 
     if args.mode == "hybrid":
-        merged_ids, source_map = search_hybrid_with_sources(
+        merged_ids, source_map = ts030_search_hybrid_with_sources(
             query=query,
             embedding_records=embedding_records,
             top_k=args.top_k,

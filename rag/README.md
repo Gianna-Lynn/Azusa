@@ -16,8 +16,9 @@
 - 只支持最小链路
 - 先以 `txt` 文件为主
 - 已接入最小 embedding 链路
-- 暂不接入 hybrid、rerank、eval
-- 暂不调用 Azusa Rust HTTP 服务
+- 已接入最小 Rust HTTP HNSW 检索链路
+- 已接入最小 hybrid 检索骨架
+- 暂不接入 rerank、eval
 
 # 相似度口径
 
@@ -57,7 +58,7 @@ python -m azusa_rag.embed_main
 
 # 检索前提
 
-- 如果要跑 `mode="hnsw"` 的检索, 需要先在仓库根目录启动 `azusa_server`
+- 如果要跑 `mode="hnsw"` 或 `mode="hybrid"` 的检索, 需要先在仓库根目录启动 `azusa_server`
 - `azusa_server` 当前使用的是内存索引, 服务重启后索引会清空
 - 如果换了一批新的 `embedding.jsonl` / 新的数据集, 请先重启 `azusa_server`, 再重新跑 HNSW 检索, 避免旧索引和当前 Python 侧记录错位
 - 当前最小命令示例:
@@ -70,8 +71,26 @@ cargo run --bin azusa_server
 ```powershell
 cd F:\Repositories\Azusa\rag
 $env:PYTHONPATH='src'
+python run_search.py --mode brute --top-k 3
 python run_search.py --mode hnsw --top-k 3
+python run_search.py --mode hybrid --top-k 3
 ```
+
+# 检索输出
+
+- `run_search.py` 会把检索结果写到 `output/search_result_<mode>.json`
+- `mode=brute` / `mode=hnsw` 时, 输出结果包含:
+  - `rank`
+  - `doc_id`
+  - `chunk_id`
+  - `source`
+  - `chunk_index`
+  - `page`
+  - `preview`
+  - `full_text`
+- `mode=hybrid` 时, 每条结果会额外包含:
+  - `retrieval_source`
+  - 取值可能是 `dense`、`sparse`、`dense + sparse`
 
 # 输出结果
 - 输出文件：`output/chunks.jsonl`

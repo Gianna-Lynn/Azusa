@@ -1,8 +1,10 @@
-# 把前面已经写好的几块拼起来，形成一条可运行的最小流水线。
-# loaders.py 已经会读文档
-# chunker.py 已经会切 chunk
-# schemas.py 已经定义了 chunk 长什么样
-# config.py 已经放了路径和参数
+"""
+整个项目的主入口, 负责把前面写好的几块拼起来, 形成一条可运行的最小流水线.
+主要作用是: 
+1. 调用 loaders.py 读文档; 
+2. 调用 chunker.py 切 chunk; 
+3. 把切好的 chunk 写成 jsonl 文件, 输出到 output/chunks.jsonl 里.
+"""
 
 from pathlib import Path
 from .schemas import ChunkRecord  # 这里的.表示 "从当前的包"里面找schemas. 但是Python就会问"你现在当前文件属于哪个包?" python -m azusa_rag.main 明确指示当前包是azusa_rag, $env:PYTHONPATH='src'告诉Python: 包azusa_rag在src下面, 去那里查找.
@@ -32,6 +34,10 @@ def write_jsonl(output_path: Path, records: list[ChunkRecord]) -> None: # jsonl 
 
 
 def main() -> None:
+    """
+    主函数
+    """
+
     # 拿配置
     # 调 load_documents(...)
     # 准备一个总列表

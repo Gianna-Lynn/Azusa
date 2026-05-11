@@ -47,6 +47,8 @@ struct SearchRequest{
 }
 
 // SearchHit和SearchResponse是服务器返回给客户端的JSON, 所以需要能够序列化为JSON.
+
+///返回一条命中记录(id, score)
 #[derive(Serialize)]
 struct SearchHit{
     id: u64,
@@ -54,6 +56,7 @@ struct SearchHit{
 }
 
 // 对应接口返回值
+///返回一堆命中记录 Vec<(id, score)>
 #[derive(Serialize)]
 struct SearchResponse{
     results: Vec<SearchHit>,
@@ -61,6 +64,7 @@ struct SearchResponse{
 
 // HealthResponse也返回JSON
 // 对应接口返回值
+/// record_count是HNSW表中存在的节点数
 #[derive(Serialize)]
 struct HealthResponse{
     status: String,

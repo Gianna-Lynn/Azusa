@@ -1,18 +1,17 @@
 """
-把 raw/ 中的原始文档读进程序当中.
+负责从文件里加载数据, 形成内存里的数据结构, 供后续的切chunk和写jsonl使用.
 """
 from pathlib import Path
-from .schemas import ChunkRecord
+from .schemas import ChunkRecord, EmbeddingRecord
 import json
 
 def load_text_file(file_path: Path) -> str:
     """
     打开file_path所指定的文本文件, 读它的内容, 返回一个字符串.
+    此为load_documents的helper, 不宜单独import
     """
     with file_path.open("r", encoding="utf-8") as text_file:
         return text_file.read()
-
-    
 
 
 def load_documents(files_path: Path) -> list[dict]:
@@ -58,3 +57,19 @@ def load_chunk_records(jsonl_path: Path) -> list[ChunkRecord]:
             chunk_record_list.append(chunk_record)
 
     return chunk_record_list
+
+
+def load_embedding_records(jsonl_path: Path) -> list[EmbeddingRecord]:
+    """
+    从jsonl文件里读embedding记录, 返回一个EmbeddingRecord对象的列表.
+    """
+    embedding_record_list = []
+
+    with jsonl_path.open("r", encoding="utf-8") as jsonl_file:
+        
+        for line in jsonl_file:
+            record_dict = json.loads(line)  # 这里的record_dict是一个字典, 这个字典的结构刚好和ChunkRecord一致
+            embedding_record = EmbeddingRecord(**record_dict) # chunks.jsonl里每一行的键, 都和ChunkRecord的字段名一致. **方法可以"把字典摊开", 直接赋值进去.
+            embedding_record_list.append(embedding_record)
+
+    return embedding_record_list

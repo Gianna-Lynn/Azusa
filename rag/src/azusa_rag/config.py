@@ -1,7 +1,10 @@
+"""
+定义全局的配置项, 方便在项目的其他地方引用
+"""
 from pathlib import Path
 
 # 自动定位rag这个小项目的根目录
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]  # F:\Repositories\Azusa\rag
 # 从当前这个config.py文件的位置, 一路往上找, 找到 rag/这个项目根目录
 # __file__表示 "当前这个Python文件自己的路径"
 # 也就是F:\Repositories\Azusa\rag\src\azusa_rag\config.py
@@ -22,5 +25,19 @@ CHUNK_OUTPUT_PATH = OUTPUT_DIR / "chunks.jsonl"
 
 EMBEDDING_OUTPUT_PATH = OUTPUT_DIR / "embedding.jsonl"
 
+EMBEDDING_MODEL_NAME = "Qwen/Qwen3-Embedding-0.6B" # 这个是专门用来编码的模型, 接下来的配置要和embedder.py里调用的地方保持一致.
+EMBEDDING_DIM = 512       # 模型的向量维度.
+EMBEDDING_DEVICE = "cuda" # 模型所在的设备.
+EMBEDDING_BATCH_SIZE = 1  # 模型的批处理大小.
+EMBEDDING_MAX_LENGTH = 512 # 编码时允许使用的最大token长度.
+
+
 CHUNK_SIZE = 300
 CHUNK_OVERLAP = 30
+
+QUERY_DIR = PROJECT_ROOT / "data" / "queries"
+
+URL = "http://127.0.0.1:3000"
+HEALTH_URL = f"{URL}/health"
+SEARCH_URL = f"{URL}/search"
+INSERT_URL = f"{URL}/insert"

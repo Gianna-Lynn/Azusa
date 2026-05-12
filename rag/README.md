@@ -18,7 +18,8 @@
 - 已接入最小 embedding 链路
 - 已接入最小 Rust HTTP HNSW 检索链路
 - 已接入最小 hybrid 检索骨架
-- 暂不接入 rerank、eval
+- 已接入最小 eval 骨架
+- 已接入最小 rerank 占位骨架
 
 # 相似度口径
 
@@ -74,7 +75,23 @@ $env:PYTHONPATH='src'
 python run_search.py --mode brute --top-k 3
 python run_search.py --mode hnsw --top-k 3
 python run_search.py --mode hybrid --top-k 3
+python run_search.py --mode hybrid_rerank --top-k 3
+python run_eval.py --mode brute --top-k 3
+python run_eval.py --mode all --top-k 3
 ```
+
+# 最小评测
+
+- 评测集路径：`data/eval/min_eval.jsonl`
+- 当前 gold 粒度：`chunk_id`
+- 当前指标：
+  - `Hit@k`
+  - `Recall@k`
+  - `MRR`
+- `run_eval.py --mode all` 会依次跑 `brute`、`hnsw`、`hybrid`
+- 当前最小 rerank 模式：`hybrid_rerank`
+- `hybrid_rerank` 的实现方式是“先扩大 hybrid 候选召回, 再用轻量词面规则重排”
+- 如果要跑 `hnsw` / `hybrid` 的评测，同样需要先启动 `azusa_server`
 
 # 检索输出
 

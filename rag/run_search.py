@@ -13,7 +13,12 @@ from pathlib import Path
 from azusa_rag.config import EMBEDDING_OUTPUT_PATH, OUTPUT_DIR
 from azusa_rag.loaders import load_embedding_records
 from azusa_rag.schemas import EmbeddingRecord
-from azusa_rag.search import get_query, search, ts030_search_hybrid_with_sources
+from azusa_rag.search import (
+    get_query,
+    search,
+    ts030_search_hybrid_rerank_with_sources,
+    ts030_search_hybrid_with_sources,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -21,7 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     统一定义命令行参数, 避免把 mode / top_k 写死在代码里.
     """
     parser = argparse.ArgumentParser(description="Run Azusa RAG search")
-    parser.add_argument("--mode", choices=["brute", "hnsw", "hybrid"], default="hnsw")
+    parser.add_argument("--mode", choices=["brute", "hnsw", "hybrid", "hybrid_rerank"], default="hnsw")
     parser.add_argument("--top-k", type=int, default=3)
     parser.add_argument("--output-name", default="search_result")
     return parser
@@ -107,6 +112,15 @@ def main() -> None:
 
     if args.mode == "hybrid":
         merged_ids, source_map = ts030_search_hybrid_with_sources(
+            query=query,
+            embedding_records=embedding_records,
+            top_k=args.top_k,
+        )
+        result_records = []
+        for merged_id in merged_ids:
+            result_records.append(embedding_records[merged_id])
+    elif args.mode == "hybrid_rerank":
+        merged_ids, source_map = ts030_search_hybrid_rerank_with_sources(
             query=query,
             embedding_records=embedding_records,
             top_k=args.top_k,

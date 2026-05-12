@@ -14,6 +14,7 @@ from .config import EMBEDDING_OUTPUT_PATH, QUERY_DIR, HEALTH_URL, SEARCH_URL, IN
 from .schemas import EmbeddingRecord
 from .embedder import embed_text_list
 import json
+import re
 import urllib.request
 
 
@@ -161,13 +162,7 @@ def ts030_sparse_score(query: str, text: str) -> int:
     # text_set = set(text_lower)
     # cross_set = query_set & text_set  # 求交集, 算交集大小
     # return len(cross_set)
-    query_lines = query_lower.splitlines()  # list[str]
-    query_fragments = []
-    for line in query_lines:
-        line = line.strip()
-        if not line:
-            continue
-        query_fragments.append(line)
+    query_fragments = ts030_collect_query_fragments(query_lower)
     
     score = 0
     for query_fragment in query_fragments:   # 检查query里面的关键句子是不是在chunk文本中出现过
@@ -177,6 +172,80 @@ def ts030_sparse_score(query: str, text: str) -> int:
     # 目前需要query_fragment是text_lower中的子串才能加分, 需要原样出现, 过于严格. 可以把query_fragment进一步往下切分.
     
     return score
+
+def ts030_collect_query_fragments(query: str) -> list[str]:
+    """
+    把 query 按行切开, 保留非空片段, 供 sparse / rerank 共用.
+    """
+    query_lines = query.lower().splitlines()
+    query_fragments = []
+    for line in query_lines:
+        line = line.strip()
+        if not line:
+            continue
+        query_fragments.append(line)
+    return query_fragments
+
+def ts030_collect_query_tokens(query: str) -> list[str]:
+    """
+    给最小 rerank 用的轻量 token 列表.
+    这里只做很粗糙的切分, 先够用即可.
+    """
+    query_tokens = re.findall(r"\w+", query.lower())
+    filtered_tokens = []
+    for token in query_tokens:
+        if len(token) <= 1:
+            continue
+        filtered_tokens.append(token)
+    return filtered_tokens
+
+def ts030_rerank_score(query: str, text: str) -> int:
+    """
+    最小 rerank 打分:
+    - 优先看整句片段是否命中
+    - 再补一个很轻量的 token overlap
+    """
+    text_lower = text.lower()
+    query_fragments = ts030_collect_query_fragments(query)
+    query_tokens = ts030_collect_query_tokens(query)
+
+    fragment_hit_score = 0
+    fragment_length_score = 0
+    for query_fragment in query_fragments:
+        if query_fragment in text_lower:
+            fragment_hit_score += 1
+            fragment_length_score += len(query_fragment)
+
+    token_overlap_score = 0
+    for query_token in query_tokens:
+        if query_token in text_lower:
+            token_overlap_score += 1
+
+    return fragment_hit_score * 1000 + fragment_length_score * 10 + token_overlap_score
+
+def ts030_rerank_candidates(
+    query: str,
+    candidate_ids: list[int],
+    embedding_records: list[EmbeddingRecord],
+    top_k: int,
+) -> list[int]:
+    """
+    对候选集合做一个最小 rerank.
+    同分时保持原始召回顺序稳定.
+    """
+    rerank_items = []
+    for original_rank, candidate_id in enumerate(candidate_ids):
+        record = embedding_records[candidate_id]
+        rerank_score = ts030_rerank_score(query, record.text)
+        rerank_items.append((rerank_score, original_rank, candidate_id))
+
+    rerank_items.sort(key=lambda item: (-item[0], item[1], item[2]))
+
+    reranked_ids = []
+    for (_, _, candidate_id) in rerank_items:
+        reranked_ids.append(candidate_id)
+
+    return reranked_ids[:top_k]
 
 def ts030_search_sparse(query: str, embedding_records_list : list[EmbeddingRecord], top_k = 3) -> list[int]:
     """
@@ -268,6 +337,32 @@ def ts030_search_hybrid_with_sources(
     source_map = ts030_build_source_map(merged_ids, dense_ids, sparse_ids)
     return merged_ids, source_map
 
+def ts030_search_hybrid_rerank_with_sources(
+    query: str,
+    embedding_records: list[EmbeddingRecord],
+    top_k: int,
+) -> tuple[list[int], list[dict]]:
+    """
+    最小 hybrid rerank:
+    先扩大候选召回, 再用占位 rerank 规则做一次重排.
+    """
+    candidate_k = min(len(embedding_records), max(top_k * 3, top_k + 2))
+
+    query_vec = embed_query(query)
+    search_vecs = build_search_vecs(embedding_records)
+    ensure_hnsw_index_loaded(embedding_records)
+    dense_ids = search_core_hnsw(query_vec, search_vecs, candidate_k)
+    sparse_ids = ts030_search_sparse(query, embedding_records, candidate_k)
+    merged_candidate_ids = ts030_hybrid_merge(dense_ids, sparse_ids, candidate_k)
+    reranked_ids = ts030_rerank_candidates(
+        query=query,
+        candidate_ids=merged_candidate_ids,
+        embedding_records=embedding_records,
+        top_k=top_k,
+    )
+    source_map = ts030_build_source_map(reranked_ids, dense_ids, sparse_ids)
+    return reranked_ids, source_map
+
 def ensure_hnsw_index_loaded(embedding_records: list[EmbeddingRecord]) -> None:
     """
     确保 Rust Hnsw 中已经有数据了.
@@ -344,9 +439,14 @@ def build_insert_record(
     }
 
 
-def search(query: str, embedding_records: list[EmbeddingRecord],top_k: int, mode="brute"):
+def search(
+        query: str, 
+        embedding_records: list[EmbeddingRecord],
+        top_k: int, 
+        mode="brute"
+    ) -> list[EmbeddingRecord]:
     """
-    完整的搜索流程.
+    完整的搜索流程.默认使用"brute"方法.
     """
     # query -> query_vector
     query_vec = embed_query(query=query) # list[float]
@@ -361,8 +461,10 @@ def search(query: str, embedding_records: list[EmbeddingRecord],top_k: int, mode
         top_k_list = search_core_hnsw(query_vec=query_vec, search_vecs=search_vecs, top_k=top_k)
     elif mode == "hybrid":
         top_k_list, _ = ts030_search_hybrid_with_sources(query, embedding_records, top_k)
+    elif mode == "hybrid_rerank":
+        top_k_list, _ = ts030_search_hybrid_rerank_with_sources(query, embedding_records, top_k)
     else:
-        raise ValueError("Search mode must be brute, hnsw, or hybrid")
+        raise ValueError("Search mode must be brute, hnsw, hybrid, or hybrid_rerank")
     # 用 id 回查原始 EmbeddingRecord
     result_embedrcd_list = []
     for top_k_id in top_k_list:
@@ -385,5 +487,3 @@ def main():
     
 if __name__ == "__main__":
     main()
-
-

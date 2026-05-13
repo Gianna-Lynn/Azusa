@@ -48,6 +48,7 @@
 cd rag
 python run_main.py
 python run_embed.py
+python run_import_hf_eval.py --length 20
 ```
 模块运行
 ```powershell
@@ -55,6 +56,7 @@ cd rag
 $env:PYTHONPATH='src'
 python -m azusa_rag.main
 python -m azusa_rag.embed_main
+python -m azusa_rag.hf_dataset_import --length 20
 ```
 
 # 检索前提
@@ -83,6 +85,7 @@ python run_eval.py --mode all --top-k 3
 # 最小评测
 
 - 评测集路径：`data/eval/min_eval.jsonl`
+- 可扩展示例：`python run_import_hf_eval.py --length 20`
 - 当前 gold 粒度：`chunk_id`
 - 当前指标：
   - `Hit@k`
@@ -92,6 +95,11 @@ python run_eval.py --mode all --top-k 3
 - 当前最小 rerank 模式：`hybrid_rerank`
 - `hybrid_rerank` 的实现方式是“先扩大 hybrid 候选召回, 再用轻量词面规则重排”
 - 如果要跑 `hnsw` / `hybrid` 的评测，同样需要先启动 `azusa_server`
+- `run_import_hf_eval.py` 默认从 Hugging Face 的 `autoevaluate/squad-sample` 导入一小批问答样本:
+  - 写入 `data/raw/*.txt`
+  - 生成 `data/eval/hf_squad_sample_eval.jsonl`
+  - 额外写几条 `data/queries/*.txt` 方便手工搜
+- 这个导入脚本直接调用 Hugging Face datasets-server 的 rows API, 不依赖本地 `datasets` 包
 
 # 检索输出
 

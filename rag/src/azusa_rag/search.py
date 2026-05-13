@@ -16,6 +16,9 @@ from .embedder import embed_text_list
 import json
 import re
 import urllib.request
+import warnings
+
+from .reranker import score_query_passage_pairs
 
 
 def read_json_response(response) -> dict:
@@ -191,10 +194,10 @@ def ts030_collect_query_tokens(query: str) -> list[str]:
     给最小 rerank 用的轻量 token 列表.
     这里只做很粗糙的切分, 先够用即可.
     """
-    query_tokens = re.findall(r"\w+", query.lower())
+    query_tokens = re.findall(r"\w+", query.lower()) # 用正则提取所有词字符片段, 得到token列表. 输入：Hello, Azusa 123 输出：["hello", "azusa", "123"]
     filtered_tokens = []
     for token in query_tokens:
-        if len(token) <= 1:
+        if len(token) <= 1: # 去掉太短的token, 比如a, l, 1
             continue
         filtered_tokens.append(token)
     return filtered_tokens
@@ -206,20 +209,20 @@ def ts030_rerank_score(query: str, text: str) -> int:
     - 再补一个很轻量的 token overlap
     """
     text_lower = text.lower()
-    query_fragments = ts030_collect_query_fragments(query)
-    query_tokens = ts030_collect_query_tokens(query)
+    query_fragments = ts030_collect_query_fragments(query) # 取得整句片段
+    query_tokens = ts030_collect_query_tokens(query)  # 统计片段长度
 
     fragment_hit_score = 0
     fragment_length_score = 0
     for query_fragment in query_fragments:
         if query_fragment in text_lower:
-            fragment_hit_score += 1
-            fragment_length_score += len(query_fragment)
+            fragment_hit_score += 1    # 如果整句命中, 加1000分
+            fragment_length_score += len(query_fragment)    # 整句命中的前提下, 整句越长, 说明匹配越具体, 分数越高. 长度值每多1, 加10分. 
 
     token_overlap_score = 0
-    for query_token in query_tokens:
+    for query_token in query_tokens:  
         if query_token in text_lower:
-            token_overlap_score += 1
+            token_overlap_score += 1   # 如果token命中, 每个token加1分
 
     return fragment_hit_score * 1000 + fragment_length_score * 10 + token_overlap_score
 
@@ -230,16 +233,45 @@ def ts030_rerank_candidates(
     top_k: int,
 ) -> list[int]:
     """
-    对候选集合做一个最小 rerank.
+    对候选集合做一次 rerank.
+    优先尝试模型 reranker; 如果模型不可用或推理失败, 再回退到规则 rerank.
     同分时保持原始召回顺序稳定.
     """
+    try:
+        candidate_texts = []
+        for candidate_id in candidate_ids:
+            candidate_texts.append(embedding_records[candidate_id].text)
+
+        # 这里把候选 id 映射回原文文本, 再交给 cross-encoder 做逐对打分.
+        model_scores = score_query_passage_pairs(query, candidate_texts)
+        if len(model_scores) != len(candidate_ids):
+            raise ValueError("Reranker score count does not match candidate count.")
+
+        rerank_items = []
+        for original_rank, (candidate_id, rerank_score) in enumerate(zip(candidate_ids, model_scores)):
+            rerank_items.append((rerank_score, original_rank, candidate_id))
+
+        # 模型分数优先; 如果分数相同, 仍然尽量保留原始召回顺序, 避免结果抖动.
+        rerank_items.sort(key=lambda item: (-item[0], item[1], item[2])) # 先看rerank分数, 分数高的在前面; 如果分数一样, 看原始召回顺序, 越早被召回的越靠前; 如果前两项都一样, 看id, id越小的越靠前
+
+        reranked_ids = []
+        for (_, _, candidate_id) in rerank_items:
+            reranked_ids.append(candidate_id)
+
+        return reranked_ids[:top_k]
+    except Exception as error:
+        warnings.warn(
+            f"BGE reranker failed, falling back to rule-based rerank: {error}"
+        )
+
+    # fallback 的设计目标不是追求高精度, 而是保证 hybrid_rerank 模式始终可用.
     rerank_items = []
     for original_rank, candidate_id in enumerate(candidate_ids):
         record = embedding_records[candidate_id]
         rerank_score = ts030_rerank_score(query, record.text)
         rerank_items.append((rerank_score, original_rank, candidate_id))
 
-    rerank_items.sort(key=lambda item: (-item[0], item[1], item[2]))
+    rerank_items.sort(key=lambda item: (-item[0], item[1], item[2])) # 先看rerank分数, 分数高的在前面; 如果分数一样, 看原始召回顺序, 越早被召回的越靠前; 如果前两项都一样, 看id, id越小的越靠前
 
     reranked_ids = []
     for (_, _, candidate_id) in rerank_items:
@@ -249,8 +281,8 @@ def ts030_rerank_candidates(
 
 def ts030_search_sparse(query: str, embedding_records_list : list[EmbeddingRecord], top_k = 3) -> list[int]:
     """
-    最小sparse检索内核:
-    遍历所有记录, 用token overlap打分, 返回 top-k 的 id
+    最小 sparse 检索内核.
+    遍历所有记录, 用轻量词面规则打分, 返回 top-k 的 id.
     """
     # 遍历每个 embedding_record
     # 用 ts030_sparse_score(query, record.text) 算分 (直接用文本比对, 而不是取向量)
@@ -270,9 +302,9 @@ def ts030_search_sparse(query: str, embedding_records_list : list[EmbeddingRecor
 
 def ts030_hybrid_merge(dense_ids: list[int], sparse_ids: list[int], top_k: int) -> list[int]:
     """
-    最小hybrid merge:
-    混合dense(语义相似,如HNSW)和sparse(字面匹配,如BM25)的搜索序列结果.
-    当前只实现合二为一, 去重截断. 没有加权打分, 也没有二次排序.
+    最小 hybrid merge.
+    混合 dense(语义相似, 如 HNSW) 和 sparse(字面匹配) 的搜索结果.
+    当前只做“按顺序合并 + 去重 + 截断”, 不做加权打分.
     """
     # 输入一份 dense_ids
     # 输入一份 sparse_ids
@@ -288,6 +320,7 @@ def ts030_hybrid_merge(dense_ids: list[int], sparse_ids: list[int], top_k: int) 
         merged_ids.append(dense_id)
         seen_ids.add(dense_id)
 
+    # dense 结果先保留原顺序, sparse 只负责补充 dense 没召回到的候选.
     for sparse_id in sparse_ids:
         if sparse_id in seen_ids:
             continue
@@ -301,6 +334,9 @@ def ts030_build_source_map(
     dense_ids: list[int],
     sparse_ids: list[int],
 ) -> list[dict]:
+    """
+    为 hybrid 结果补充来源标记, 方便观察每条结果来自 dense、sparse 还是两者都有.
+    """
     dense_ids_set = set(dense_ids)
     sparse_ids_set = set(sparse_ids)
     source_items = []
@@ -325,11 +361,13 @@ def ts030_search_hybrid_with_sources(
     top_k: int,
 ) -> tuple[list[int], list[dict]]:
     """
-    hybrid专用的helper:
-    返回dense和sparse搜索结果merge后的id列表, 返回每条结果的来源标记.
+    hybrid 专用 helper.
+    先分别跑 dense / sparse, 再合并结果, 最后返回 id 列表和来源标记.
     """
     query_vec = embed_query(query)
     search_vecs = build_search_vecs(embedding_records)
+
+    # hybrid 的 dense 部分复用了 HNSW, 因此也需要先保证 server 端索引已装载.
     ensure_hnsw_index_loaded(embedding_records)
     dense_ids =  search_core_hnsw(query_vec, search_vecs, top_k)
     sparse_ids = ts030_search_sparse(query, embedding_records, top_k)
@@ -343,29 +381,35 @@ def ts030_search_hybrid_rerank_with_sources(
     top_k: int,
 ) -> tuple[list[int], list[dict]]:
     """
-    最小 hybrid rerank:
-    先扩大候选召回, 再用占位 rerank 规则做一次重排.
+    最小 hybrid rerank.
+    先扩大 dense + sparse 的候选召回, 再用 reranker 对候选集做二次重排.
     """
-    candidate_k = min(len(embedding_records), max(top_k * 3, top_k + 2))
+    # 新增:把候选集从top_k扩大到candidate_k
+    candidate_k = min(len(embedding_records), max(20, top_k * 5))
 
     query_vec = embed_query(query)
     search_vecs = build_search_vecs(embedding_records)
     ensure_hnsw_index_loaded(embedding_records)
     dense_ids = search_core_hnsw(query_vec, search_vecs, candidate_k)
     sparse_ids = ts030_search_sparse(query, embedding_records, candidate_k)
+
+    # 这里先拿到一个“更宽”的候选集, reranker 才有空间把原本排位靠后的好结果提上来.
     merged_candidate_ids = ts030_hybrid_merge(dense_ids, sparse_ids, candidate_k)
+    
+    # 新增:用rerank重排序一次
     reranked_ids = ts030_rerank_candidates(
         query=query,
         candidate_ids=merged_candidate_ids,
         embedding_records=embedding_records,
         top_k=top_k,
     )
+
     source_map = ts030_build_source_map(reranked_ids, dense_ids, sparse_ids)
     return reranked_ids, source_map
 
 def ensure_hnsw_index_loaded(embedding_records: list[EmbeddingRecord]) -> None:
     """
-    确保 Rust Hnsw 中已经有数据了.
+    确保 Rust HNSW server 里已经装入了当前这批 embedding 数据.
     """
     # 先请求 /health
     # 按照azusa_server的health_handler, 返回的是 Json<HealthResponse>
@@ -403,7 +447,7 @@ def build_insert_record(
     record_id: int,
 ) -> dict:
     """
-    把EmbeddingRecord变成VectorRecord, 送给azusa_server的insert方法
+    把 EmbeddingRecord 变成 azusa_server /insert 所需的 VectorRecord 字典.
     """
     # VectorRecord形如:
     # {
@@ -446,7 +490,8 @@ def search(
         mode="brute"
     ) -> list[EmbeddingRecord]:
     """
-    完整的搜索流程.默认使用"brute"方法.
+    完整的搜索流程.
+    按 mode 选择 brute / hnsw / hybrid / hybrid_rerank, 最终返回 EmbeddingRecord 列表.
     """
     # query -> query_vector
     query_vec = embed_query(query=query) # list[float]
@@ -462,6 +507,7 @@ def search(
     elif mode == "hybrid":
         top_k_list, _ = ts030_search_hybrid_with_sources(query, embedding_records, top_k)
     elif mode == "hybrid_rerank":
+        # hybrid_rerank 在 hybrid 召回的基础上再走一次 rerank 重排.
         top_k_list, _ = ts030_search_hybrid_rerank_with_sources(query, embedding_records, top_k)
     else:
         raise ValueError("Search mode must be brute, hnsw, hybrid, or hybrid_rerank")

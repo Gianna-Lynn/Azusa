@@ -1,3 +1,10 @@
 {"query_id":"min_eval_query_1","query":"有时只需要一本足够厚的书\n欢迎加入正确座位秩序共同体","relevant_chunk_ids":["cat_notes_1_chunk_001","cat_notes_1_chunk_002"],"notes":"同一主题句跨越相邻两个 chunk，适合验证 chunk 级召回是否稳定。"}
 {"query_id":"min_eval_query_2","query":"人生有时需要击中重点\n教宗猫以极高礼貌完成座位确认","relevant_chunk_ids":["cat_notes_2_chunk_002"],"notes":"两句都落在同一个 chunk，适合做最小精确命中测试。"}
 {"query_id":"min_eval_query_3","query":"JR常磐缓行线\n常规意义上的直通运转","relevant_chunk_ids":["cat_notes_3_chunk_000","cat_notes_3_chunk_002"],"notes":"query 同时覆盖 JR-地铁直通正例与都营不常规直通说明。"}
+{"query_id":"min_eval_query_4","query":"精神上，当然是精神上\n懂事是好事","relevant_chunk_ids":["cat_notes_1_chunk_000"],"notes":"验证第一段客舱秩序场景能被精确召回。"}
+{"query_id":"min_eval_query_5","query":"很多觉醒都始于一个问题\n也可能始于一个答案","relevant_chunk_ids":["cat_notes_1_chunk_002"],"notes":"验证短尾金句型 query 能命中结尾 chunk。"}
+{"query_id":"min_eval_query_6","query":"您的座位是 17A\n主也为您预备了窗景","relevant_chunk_ids":["cat_notes_2_chunk_003"],"notes":"验证中段座位纠纷处理结果的精确命中。"}
+{"query_id":"min_eval_query_7","query":"放在可以看见的地方吧\n这样大家都会更尊重登机牌","relevant_chunk_ids":["cat_notes_2_chunk_004"],"notes":"验证棒球棒存在感与登机牌秩序段落。"}
+{"query_id":"min_eval_query_8","query":"第一，不要占座\n17A 的窗景其实也不错","relevant_chunk_ids":["cat_notes_2_chunk_005"],"notes":"验证降落前总结段落的精确召回。"}
+{"query_id":"min_eval_query_9","query":"也愿登机牌与你同在\n座位号也很重要咪","relevant_chunk_ids":["cat_notes_2_chunk_006"],"notes":"验证尾声短 chunk 在 top-k 中可被稳定命中。"}
+{"query_id":"min_eval_query_10","query":"JR埼京线 ↔ 临海线\n它不是东京地铁","relevant_chunk_ids":["cat_notes_3_chunk_003"],"notes":"验证 JR 与临海线直通但不属于东京地铁的说明。"}

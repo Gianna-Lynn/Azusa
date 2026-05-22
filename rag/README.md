@@ -49,6 +49,8 @@ cd rag
 python run_main.py
 python run_embed.py
 python run_import_hf_eval.py --length 20
+python run_search.py --mode hnsw --top-k 3
+python run_eval.py --mode all --top-k 3
 ```
 模块运行
 ```powershell
@@ -73,7 +75,6 @@ cargo run --bin azusa_server
 
 ```powershell
 cd F:\Repositories\Azusa\rag
-$env:PYTHONPATH='src'
 python run_search.py --mode brute --top-k 3
 python run_search.py --mode hnsw --top-k 3
 python run_search.py --mode hybrid --top-k 3
@@ -81,6 +82,11 @@ python run_search.py --mode hybrid_rerank --top-k 3
 python run_eval.py --mode brute --top-k 3
 python run_eval.py --mode all --top-k 3
 ```
+
+- `run_search.py` 现在支持:
+  - `--query-text "..."`：直接传一条 query
+  - `--query-file path/to/query.txt`：显式指定 query 文件
+  - 如果两者都不传，才会回退到 `data/queries/` 目录中的默认 query
 
 # 最小评测
 

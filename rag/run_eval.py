@@ -4,6 +4,9 @@
 2. 调用现有检索流程拿回 top-k 结果
 3. 计算 Hit@k / Recall@k / MRR
 4. 在终端打印摘要, 同时把结构化结果写入 output
+备注:
+MRR = (1 / N) * Σ (1 / rank_i), 其中 N 是查询总数, rank_i 是第 i 个查询的第一个正确答案出现的位置. 
+MRR 越接近 1.0 越好.
 """
 
 import argparse

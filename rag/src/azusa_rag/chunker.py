@@ -30,51 +30,48 @@ def _strip_span(text: str, start: int, end: int) -> tuple[int, int]:
 
 def chunk_text_with_spans(text: str, chunk_size: int, overlap_size: int) -> list[tuple[str, int, int]]:
     """
-    把文本切成多个 chunk, 同时保留每个 chunk 在原文里的字符区间.
+    把文本切成多个 chunk, 返回一个列表, 每一项是一个元组, 内含一个chunk, 和本chunk在原文里的起止位置.
     """
-    _validate_chunk_params(chunk_size, overlap_size)
+    _validate_chunk_params(chunk_size, overlap_size) # 检查 chunk 参数是否合法
 
-    chunk_items = []
+    chunk_items = []    # 准备结果容器
+    start = 0           # 准备切分起点
 
-    start = 0
-    while start < len(text):
+    while start < len(text):   # 只要当前位置还没走到文本末尾，就继续切下一块。
         remaining_length = len(text) - start
 
-        if remaining_length <= chunk_size:  # 如果剩下的长度不够chunk_size
+        if remaining_length <= chunk_size:  # 如果剩下的长度不够chunk_size, 说明后面这点文本已经装得下一个完整块了。
             stripped_start, stripped_end = _strip_span(text, start, len(text))
             chunk = text[stripped_start: stripped_end]
             if chunk:
                 chunk_items.append((chunk, stripped_start, stripped_end))
             break
 
-        end = start + chunk_size  # end表示本次切割的终点
-        # 这是之前的end的赋值逻辑, 在这里需要依据last_boundary进行修改. 
+        end = start + chunk_size  # end表示本次切割的终点. 这是朴素的end的赋值逻辑, 在后面需要依据last_boundary进行修改. 
         
         candidate = text[start: end] # "切出子串" 利用Python的切片 # strip可以移除打头和尾巴上的空格 # 由于引入了边界字符机制, 不再使用.strip
 
         last_boundary = -1    # 注意last_boundary是相对于candidate的索引, 不是相对于大text的索引. 所以调整后的长度是 last_boundary + 1
 
-        for boundary in natural_boundaries:
-            pos = candidate.rfind(boundary)
+        for boundary in natural_boundaries: # 在candidate内找一些更自然的结束位置, 如换行, 句号, 问号等.
+            pos = candidate.rfind(boundary) # 推测rfind是从最右侧往左找到第一个boundary字符.
             if pos > last_boundary:
-                last_boundary = pos
-                # 可能需要考虑一种情况, 即便是最靠后的pos也会导致整个chunk的长度过小
-        if last_boundary != -1:
-            adjusted_length = last_boundary + 1
-            min_chunk_length = chunk_size * 0.5
+                last_boundary = pos         # 找到最靠右侧的边界位置.
 
-            if adjusted_length >= min_chunk_length:
+        if last_boundary != -1:             # 考虑一种情况, 即便是最靠后的pos也会导致整个chunk的长度过小.
+            adjusted_length = last_boundary + 1
+            min_chunk_length = chunk_size * 0.5 # 设定允许的合理的最短chunk长度是原定chunk_size的一半.
+
+            if adjusted_length >= min_chunk_length:     # 当且仅当chunk的长度合理, 才把end修改成自然边界位置. 如果边界太靠前, 导致切出来太短, 就不再使用这个边界去切.
                 end = start + last_boundary + 1 # Python切片中传入的是左闭右开, last_boundary是在candidate里的索引, +1可以保证边界字符也被放进candidate
 
-        stripped_start, stripped_end = _strip_span(text, start, end)
+        stripped_start, stripped_end = _strip_span(text, start, end)  # 去掉两端的空白字符, 不改变中间的正文.
         chunk = text[stripped_start: stripped_end]
 
         if chunk:
             chunk_items.append((chunk, stripped_start, stripped_end))
 
-        # 下一块从“本块真实结束位置 - overlap”继续,
-        # 这样在边界收缩后也不会把中间一段文本跳过去.
-        next_start = end - overlap_size
+        next_start = end - overlap_size # 下一块从“本块真实结束位置 - overlap”继续,  这样在边界收缩后也不会把中间一段文本跳过去. 就算前面因为自然边界收缩了end, 也不会漏掉中间的一小段文本.
         if next_start <= start:
             # 理论上很少走到这里, 这里只是兜底避免极端情况下卡死.
             next_start = start + 1
@@ -107,7 +104,7 @@ def chunk_document(doc_dict: dict, chunk_size: int, overlap_size: int) -> list[C
     page = doc_dict["page"]
 
     
-    chunk_items = chunk_text_with_spans(text=text, chunk_size=chunk_size, overlap_size=overlap_size)
+    chunk_items = chunk_text_with_spans(text=text, chunk_size=chunk_size, overlap_size=overlap_size) # 这里修改为新的chunk_text_with_spans函数, 以获取chunk文本和对应的span信息.
     
     for index, (chunk, _, _) in enumerate(chunk_items):
         # chunk_id 仍然沿用原来的编号规则, 这样下游 search / eval 不需要改接口.

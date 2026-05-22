@@ -9,6 +9,12 @@
 import argparse
 import json
 from pathlib import Path
+import sys
+
+RAG_ROOT = Path(__file__).resolve().parent
+SRC_DIR = RAG_ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
 from azusa_rag.config import EMBEDDING_OUTPUT_PATH, OUTPUT_DIR
 from azusa_rag.loaders import load_embedding_records
@@ -29,7 +35,36 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mode", choices=["brute", "hnsw", "hybrid", "hybrid_rerank"], default="hnsw")
     parser.add_argument("--top-k", type=int, default=3)
     parser.add_argument("--output-name", default="search_result")
+    query_group = parser.add_mutually_exclusive_group()
+    query_group.add_argument("--query-text", help="Use an explicit query string instead of the default query file.")
+    query_group.add_argument(
+        "--query-file",
+        help="Read query text from a specific file path instead of the default query file.",
+    )
     return parser
+
+
+def load_query_text(args: argparse.Namespace) -> str:
+    """
+    统一处理 query 输入来源:
+    - 优先用命令行显式传入的 query_text
+    - 其次读指定 query_file
+    - 最后回退到默认 queries 目录中的第一条 query
+    """
+    if args.query_text is not None:
+        query_text = args.query_text.strip()
+        if not query_text:
+            raise ValueError("--query-text cannot be blank")
+        return query_text
+
+    if args.query_file is not None:
+        query_path = Path(args.query_file)
+        query_text = query_path.read_text(encoding="utf-8").strip()
+        if not query_text:
+            raise ValueError(f"Query file is blank: {query_path}")
+        return query_text
+
+    return get_query()
 
 
 def make_preview(text: str, limit: int = 100) -> str:
@@ -107,7 +142,7 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
 
-    query = get_query()
+    query = load_query_text(args)
     embedding_records = load_embedding_records(EMBEDDING_OUTPUT_PATH)
 
     if args.mode == "hybrid":

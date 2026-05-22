@@ -110,12 +110,11 @@ def score_query_passage_pairs(query: str, passage_list: list[str]) -> list[float
             # tokenizer 产出的每个张量都要搬到模型所在设备上, 否则前向会报 device mismatch.
             batch_dict = {
                 key: value.to(model_device)
-                for key, value in batch_dict.items()
+                for key, value in batch_dict.items() # 这种写法是“边遍历边生成新字典”的简写
             }
 
             # SequenceClassification 模型输出 logits;
             # 这里把它拉平成一维分数列表, 保持和输入 passage 顺序一致.
-            logits = model(**batch_dict, return_dict=True).logits.view(-1)
-            score_list.extend(logits.float().cpu().tolist())
-
+            logits = model(**batch_dict, return_dict=True).logits.view(-1) # 用 **把字典展开成函数参数传参进去. 用return_dict告诉模型不要返回普通tuple, 而是返回一个带名字的结果对象, 方便取.logits; logits是模型的原始输出分数, 分数越大, 一般意味着query和passage越相关; .view(-1)表示把
+            score_list.extend(logits.float().cpu().tolist()) # extend(...)把这一批分数逐个追加到总列表中, 而不是作为嵌套列表塞进去.
     return score_list

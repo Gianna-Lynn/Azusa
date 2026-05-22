@@ -362,17 +362,16 @@ def ts030_search_hybrid_with_sources(
 ) -> tuple[list[int], list[dict]]:
     """
     hybrid 专用 helper.
-    先分别跑 dense / sparse, 再合并结果, 最后返回 id 列表和来源标记.
+    先分别跑稠密检索(dense, 如HNSW, 是语义向量检索)和稀疏检索(sparse, 如BM25, 是传统关键词检索), 
+    再合并结果, 最后返回 id 列表和来源标记.
     """
-    query_vec = embed_query(query)
-    search_vecs = build_search_vecs(embedding_records)
-
-    # hybrid 的 dense 部分复用了 HNSW, 因此也需要先保证 server 端索引已装载.
-    ensure_hnsw_index_loaded(embedding_records)
-    dense_ids =  search_core_hnsw(query_vec, search_vecs, top_k)
-    sparse_ids = ts030_search_sparse(query, embedding_records, top_k)
-    merged_ids = ts030_hybrid_merge(dense_ids, sparse_ids, top_k)
-    source_map = ts030_build_source_map(merged_ids, dense_ids, sparse_ids)
+    query_vec = embed_query(query) # 把 query 做成向量
+    search_vecs = build_search_vecs(embedding_records) # 再把所有 embedding_records 转成检索用的向量列表
+    ensure_hnsw_index_loaded(embedding_records) # hybrid 的 dense 部分使用了 HNSW, 因此需要先保证 server 端索引已装载.
+    dense_ids =  search_core_hnsw(query_vec, search_vecs, top_k)    # 用 dense 检索拿一批结果
+    sparse_ids = ts030_search_sparse(query, embedding_records, top_k)   # 用 sparse 检索再拿一批结果
+    merged_ids = ts030_hybrid_merge(dense_ids, sparse_ids, top_k)   # 把 dense 和 sparse 结果合并去重
+    source_map = ts030_build_source_map(merged_ids, dense_ids, sparse_ids) # 给每个结果补一个来源标签
     return merged_ids, source_map
 
 def ts030_search_hybrid_rerank_with_sources(
@@ -381,25 +380,30 @@ def ts030_search_hybrid_rerank_with_sources(
     top_k: int,
 ) -> tuple[list[int], list[dict]]:
     """
-    最小 hybrid rerank.
+    基于ts030_search_hybrid_with_sources做新增和修改.
+    实现最小 hybrid rerank.
     先扩大 dense + sparse 的候选召回, 再用 reranker 对候选集做二次重排.
     """
     # 新增:把候选集从top_k扩大到candidate_k
+    # 这里先拿到一个“更宽”的候选集:
+    # 当前 hybrid merge 仍然是 dense 优先、sparse 补位的合并策略,
+    # 因此前排候选天然会带一点 dense 的主题偏向, 不一定已经是最终最优排序.
+    # 如果 candidate_k 取得太小, 某些“本来相关, 但被 merge 倾向压后”的 chunk
+    # 可能连 rerank 的入场资格都拿不到; 先把候选池放宽, reranker 才有空间纠偏,
+    # 把原本排位靠后的正确结果重新提回 top-k.
     candidate_k = min(len(embedding_records), max(20, top_k * 5))
-
+    
     query_vec = embed_query(query)
     search_vecs = build_search_vecs(embedding_records)
     ensure_hnsw_index_loaded(embedding_records)
     dense_ids = search_core_hnsw(query_vec, search_vecs, candidate_k)
     sparse_ids = ts030_search_sparse(query, embedding_records, candidate_k)
-
-    # 这里先拿到一个“更宽”的候选集, reranker 才有空间把原本排位靠后的好结果提上来.
-    merged_candidate_ids = ts030_hybrid_merge(dense_ids, sparse_ids, candidate_k)
+    merged_ids = ts030_hybrid_merge(dense_ids, sparse_ids, candidate_k)
     
     # 新增:用rerank重排序一次
     reranked_ids = ts030_rerank_candidates(
         query=query,
-        candidate_ids=merged_candidate_ids,
+        candidate_ids=merged_ids,
         embedding_records=embedding_records,
         top_k=top_k,
     )

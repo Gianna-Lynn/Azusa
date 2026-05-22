@@ -2,9 +2,6 @@
 启动src/azusa_rag/embed_main.py
 """
 
-# TODO:
-# 写一个统一的启动脚本, 利用命令行指定启动什么流程.
-
 import sys
 from pathlib import Path
 

@@ -5,6 +5,20 @@ from pathlib import Path
 from .schemas import ChunkRecord, EmbeddingRecord
 import json
 
+
+def resolve_jsonl_input_path(jsonl_path: Path) -> Path:
+    """
+    优先读取新的分层路径；如果文件还在旧的 output 根目录下，则自动回退。
+    """
+    if jsonl_path.exists():
+        return jsonl_path
+
+    legacy_path = jsonl_path.parent.parent / jsonl_path.name
+    if legacy_path.exists():
+        return legacy_path
+
+    return jsonl_path
+
 def load_text_file(file_path: Path) -> str:
     """
     打开file_path所指定的文本文件, 读它的内容, 返回一个字符串.
@@ -47,6 +61,7 @@ def load_chunk_records(jsonl_path: Path) -> list[ChunkRecord]:
     """
     从jsonl文件里读chunk记录, 返回一个ChunkRecord对象的列表.
     """
+    jsonl_path = resolve_jsonl_input_path(jsonl_path)
     chunk_record_list = []
 
     with jsonl_path.open("r", encoding="utf-8") as jsonl_file:
@@ -63,6 +78,7 @@ def load_embedding_records(jsonl_path: Path) -> list[EmbeddingRecord]:
     """
     从jsonl文件里读embedding记录, 返回一个EmbeddingRecord对象的列表.
     """
+    jsonl_path = resolve_jsonl_input_path(jsonl_path)
     embedding_record_list = []
 
     with jsonl_path.open("r", encoding="utf-8") as jsonl_file:

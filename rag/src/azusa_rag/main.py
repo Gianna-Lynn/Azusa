@@ -23,6 +23,8 @@ def write_jsonl(output_path: Path, records: list[ChunkRecord]) -> None: # jsonl 
     # 再 json.dumps(...)
     # 每条后面补一个换行
     
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
     with output_path.open("w", encoding="utf-8") as output_file: # 认为output_file是文件指针, 可以调用.write()方法. 
         # with...as的构型作用是:在这个代码块里,把文件交给output_file使用, 离开代码块时自动关闭.
         for record in records: # 每个record是一个ChunkRecord类型

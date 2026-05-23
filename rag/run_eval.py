@@ -19,7 +19,7 @@ SRC_DIR = RAG_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from azusa_rag.config import EMBEDDING_OUTPUT_PATH, OUTPUT_DIR, PROJECT_ROOT
+from azusa_rag.config import EMBEDDING_OUTPUT_PATH, EVAL_RUNS_DIR, PROJECT_ROOT
 from azusa_rag.loaders import load_embedding_records
 from azusa_rag.schemas import EmbeddingRecord
 from azusa_rag.search import search
@@ -40,7 +40,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--eval-path",
         default=str(PROJECT_ROOT / "data" / "eval" / "min_eval.jsonl"),
     )
-    parser.add_argument("--output-name", default="min_eval_result")
+    parser.add_argument(
+        "--output-name",
+        default=None,
+        help="Optional custom output basename. Omit it to overwrite the default fixed output file for the chosen mode.",
+    )
     return parser
 
 
@@ -229,7 +233,8 @@ def main() -> None:
 
         print_eval_summary(summary)
 
-        output_path = OUTPUT_DIR / f"{args.output_name}_{mode}.json"
+        output_name = args.output_name or "eval_result"
+        output_path = EVAL_RUNS_DIR / f"{output_name}_{mode}.json"
         write_eval_json(output_path, summary)
         print(f"saved to: {output_path}")
         print()

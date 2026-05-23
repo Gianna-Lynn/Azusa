@@ -160,10 +160,10 @@
 这适合当前机器直接跑, 但换机器时需要手动调整。
 
 2. 由于 chunk 逻辑已变化, 旧的:
-   - `output/chunks.jsonl`
-   - `output/embedding.jsonl`
+   - `output/artifacts/chunks.jsonl`
+   - `output/artifacts/embedding.jsonl`
 
-最好重新生成, 否则可能与新的 eval gold 或 rerank 预期不一致。
+  最好重新生成, 否则可能与新的 eval gold 或 rerank 预期不一致。
 
 3. HF 导入脚本当前面向 SQuAD 风格数据结构:
    - `question`

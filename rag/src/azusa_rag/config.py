@@ -21,9 +21,14 @@ PROCESSED_DATA_DIR = PROJECT_ROOT / "data" / "processed"
 
 OUTPUT_DIR = PROJECT_ROOT / "output"
 
-CHUNK_OUTPUT_PATH = OUTPUT_DIR / "chunks.jsonl"
+ARTIFACTS_DIR = OUTPUT_DIR / "artifacts"
+SEARCH_RUNS_DIR = OUTPUT_DIR / "search_runs"
+EVAL_RUNS_DIR = OUTPUT_DIR / "eval_runs"
+SCRATCH_DIR = OUTPUT_DIR / "scratch"
 
-EMBEDDING_OUTPUT_PATH = OUTPUT_DIR / "embedding.jsonl"
+CHUNK_OUTPUT_PATH = ARTIFACTS_DIR / "chunks.jsonl"
+
+EMBEDDING_OUTPUT_PATH = ARTIFACTS_DIR / "embedding.jsonl"
 
 EMBEDDING_MODEL_NAME = r"D:\Chuo_Data\Models\Qwen3-Embedding-0.6B" # 这个是专门用来编码的模型, 接下来的配置要和embedder.py里调用的地方保持一致.
 EMBEDDING_DIM = 512       # 模型的向量维度.

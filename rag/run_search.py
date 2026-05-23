@@ -16,7 +16,7 @@ SRC_DIR = RAG_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from azusa_rag.config import EMBEDDING_OUTPUT_PATH, OUTPUT_DIR
+from azusa_rag.config import EMBEDDING_OUTPUT_PATH, SEARCH_RUNS_DIR
 from azusa_rag.loaders import load_embedding_records
 from azusa_rag.schemas import EmbeddingRecord
 from azusa_rag.search import (
@@ -25,7 +25,7 @@ from azusa_rag.search import (
     ts030_search_hybrid_rerank_with_sources,
     ts030_search_hybrid_with_sources,
 )
-
+from azusa_rag.answerer import answer_with_citations
 
 def build_parser() -> argparse.ArgumentParser:
     """
@@ -34,7 +34,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run Azusa RAG search")
     parser.add_argument("--mode", choices=["brute", "hnsw", "hybrid", "hybrid_rerank"], default="hnsw")
     parser.add_argument("--top-k", type=int, default=3)
-    parser.add_argument("--output-name", default="search_result")
+    parser.add_argument(
+        "--output-name",
+        default=None,
+        help="Optional custom output basename. Omit it to overwrite the default fixed output file for the chosen mode.",
+    )
+    parser.add_argument("--with-answer", action="store_true", help="Whether to run the answerer on top of search results.")
     query_group = parser.add_mutually_exclusive_group()
     query_group.add_argument("--query-text", help="Use an explicit query string instead of the default query file.")
     query_group.add_argument(
@@ -83,6 +88,7 @@ def build_result_dict(
     top_k: int,
     result_records: list[EmbeddingRecord],
     source_dict_list: list[dict] | None = None,
+    answer_dict: dict | None = None,
 ) -> dict:
     """
     把搜索结果整理成结构化字典, 方便后续写入 JSON 或做模式对比.
@@ -106,13 +112,20 @@ def build_result_dict(
         
         result_items.append(result_item)
 
-    return {
+    result_dict = {
         "query": query,
         "mode": mode,
         "top_k": top_k,
         "results": result_items,
     }
 
+    if answer_dict is not None:  # 如果提供了 answer_dict，就把其中的答案文本、原始输出、引用的chunk_id列表和上下文信息添加到结果字典中.
+        result_dict["answer"] = answer_dict["answer_text"]
+        result_dict["answer_raw"] = answer_dict["answer_raw"]
+        result_dict["answer_citations"] = answer_dict["citation_ids"]
+        result_dict["answer_context"] = answer_dict["context"]
+
+    return result_dict
 
 def print_results(result_dict: dict) -> None:
     """
@@ -128,6 +141,10 @@ def print_results(result_dict: dict) -> None:
         print(f"    preview={item['preview']}")
         print()
 
+    if "answer" in result_dict:
+        print("answer:")
+        print(result_dict["answer"])
+        print()
 
 def write_result_json(output_path: Path, result_dict: dict) -> None:
     """
@@ -172,18 +189,27 @@ def main() -> None:
             top_k=args.top_k,
             mode=args.mode,
         )
+    if args.with_answer:
+        answer_dict = answer_with_citations(
+            query=query,
+            result_records=result_records,
+        )
+    else:
+        answer_dict = None
 
     result_dict = build_result_dict(
         query=query,
         mode=args.mode,
         top_k=args.top_k,
         result_records=result_records,
-        source_dict_list = source_map
+        source_dict_list = source_map,
+        answer_dict = answer_dict,
     )
 
     print_results(result_dict)
 
-    output_path = OUTPUT_DIR / f"{args.output_name}_{args.mode}.json"
+    output_name = args.output_name or "search_result"
+    output_path = SEARCH_RUNS_DIR / f"{output_name}_{args.mode}.json"
     write_result_json(output_path, result_dict)
 
     print(f"saved to: {output_path}")

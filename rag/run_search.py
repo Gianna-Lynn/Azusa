@@ -27,12 +27,14 @@ from azusa_rag.search import (
 )
 from azusa_rag.answerer import answer_with_citations
 
+SEARCH_MODES = ["brute", "hnsw", "hybrid", "hybrid_rerank"]
+
 def build_parser() -> argparse.ArgumentParser:
     """
     统一定义命令行参数, 避免把 mode / top_k 写死在代码里.
     """
     parser = argparse.ArgumentParser(description="Run Azusa RAG search")
-    parser.add_argument("--mode", choices=["brute", "hnsw", "hybrid", "hybrid_rerank"], default="hnsw")
+    parser.add_argument("--mode", choices=SEARCH_MODES, default="hnsw")
     parser.add_argument("--top-k", type=int, default=3)
     parser.add_argument(
         "--output-name",
@@ -155,41 +157,44 @@ def write_result_json(output_path: Path, result_dict: dict) -> None:
     output_path.write_text(output_text, encoding="utf-8")
 
 
-def main() -> None:
-    parser = build_parser()
-    args = parser.parse_args()
-
-    query = load_query_text(args)
-    embedding_records = load_embedding_records(EMBEDDING_OUTPUT_PATH)
-
-    if args.mode == "hybrid":
+def run_search_result(
+    query: str,
+    embedding_records: list[EmbeddingRecord],
+    mode: str,
+    top_k: int,
+    with_answer: bool = False,
+) -> dict:
+    """
+    对单条 query 执行一次完整搜索，并返回统一结果字典。
+    """
+    if mode == "hybrid":
         merged_ids, source_map = ts030_search_hybrid_with_sources(
             query=query,
             embedding_records=embedding_records,
-            top_k=args.top_k,
+            top_k=top_k,
         )
         result_records = []
         for merged_id in merged_ids:
             result_records.append(embedding_records[merged_id])
-    elif args.mode == "hybrid_rerank":
+    elif mode == "hybrid_rerank":
         merged_ids, source_map = ts030_search_hybrid_rerank_with_sources(
             query=query,
             embedding_records=embedding_records,
-            top_k=args.top_k,
+            top_k=top_k,
         )
         result_records = []
         for merged_id in merged_ids:
             result_records.append(embedding_records[merged_id])
-    
-    else: 
+    else:
         source_map = None
         result_records = search(
             query=query,
             embedding_records=embedding_records,
-            top_k=args.top_k,
-            mode=args.mode,
+            top_k=top_k,
+            mode=mode,
         )
-    if args.with_answer:
+
+    if with_answer:
         answer_dict = answer_with_citations(
             query=query,
             result_records=result_records,
@@ -197,13 +202,28 @@ def main() -> None:
     else:
         answer_dict = None
 
-    result_dict = build_result_dict(
+    return build_result_dict(
         query=query,
+        mode=mode,
+        top_k=top_k,
+        result_records=result_records,
+        source_dict_list=source_map,
+        answer_dict=answer_dict,
+    )
+
+
+def main() -> None:
+    parser = build_parser()
+    args = parser.parse_args()
+
+    query = load_query_text(args)
+    embedding_records = load_embedding_records(EMBEDDING_OUTPUT_PATH)
+    result_dict = run_search_result(
+        query=query,
+        embedding_records=embedding_records,
         mode=args.mode,
         top_k=args.top_k,
-        result_records=result_records,
-        source_dict_list = source_map,
-        answer_dict = answer_dict,
+        with_answer=args.with_answer,
     )
 
     print_results(result_dict)

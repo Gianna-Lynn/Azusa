@@ -33,6 +33,7 @@
 - `run_search.py`：单条 query 检索 / answer 验证入口
 - `run_eval.py`：检索评测入口
 - `run_import_hf_eval.py`：导入 HF QA 样本的入口
+- `run_workflow.py`：按 README 工作流一键执行并汇总结果的入口
 
 # 输出目录约定
 
@@ -61,6 +62,44 @@
   - 默认覆盖：`output/eval_runs/eval_result_<mode>.json`
 
 如果你明确想保留一次特殊实验快照，再手动传 `--output-name xxx`。
+
+# 一键工作流入口
+
+如果你不想手动逐条执行 README 里的命令、再分别打开多个 JSON 做肉眼对比，可以直接跑：
+
+```powershell
+cd F:\Repositories\Azusa\rag
+python run_workflow.py
+```
+
+这个脚本会复用现有的检索评测和 answer 验证逻辑，并把关注点尽量收敛到两份核心产物：
+
+- `output/eval_runs/workflow_summary.json`
+  - 结构化汇总四个 mode 的检索指标、delta、差异最大的 case、answer spot checks
+- `output/eval_runs/workflow_report.md`
+  - 供人类快速扫读的结论报告
+
+默认行为：
+
+- 直接使用现成的 `output/artifacts/embedding.jsonl`
+- 使用 `data/eval/min_eval.jsonl`
+- 对 `brute / hnsw / hybrid / hybrid_rerank` 四种 mode 做汇总比较
+- 额外对 `hybrid_rerank` 跑 3 条代表性 `answer + citation` spot checks
+
+可选参数示例：
+
+```powershell
+python run_workflow.py --rebuild-artifacts
+python run_workflow.py --import-hf-eval --eval-path data\eval\hf_squad_sample_eval.jsonl
+python run_workflow.py --skip-answer-checks
+python run_workflow.py --output-name hf_workflow --eval-path data\eval\hf_squad_sample_eval.jsonl
+```
+
+建议把它理解成：
+
+- `run_search.py`：单题精看
+- `run_eval.py`：纯检索指标
+- `run_workflow.py`：一键生成“这轮实验到底谁更好”的总结
 
 # 先决条件
 

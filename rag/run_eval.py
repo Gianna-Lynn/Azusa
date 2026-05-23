@@ -24,6 +24,8 @@ from azusa_rag.loaders import load_embedding_records
 from azusa_rag.schemas import EmbeddingRecord
 from azusa_rag.search import search
 
+EVAL_MODES = ["brute", "hnsw", "hybrid", "hybrid_rerank"]
+
 
 def build_parser() -> argparse.ArgumentParser:
     """
@@ -32,7 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run Azusa RAG min eval")
     parser.add_argument(
         "--mode",
-        choices=["brute", "hnsw", "hybrid", "hybrid_rerank", "all"],
+        choices=EVAL_MODES + ["all"],
         default="brute",
     )
     parser.add_argument("--top-k", type=int, default=3)
@@ -203,7 +205,7 @@ def main() -> None:
     embedding_records = load_embedding_records(EMBEDDING_OUTPUT_PATH)
 
     if args.mode == "all":
-        modes = ["brute", "hnsw", "hybrid", "hybrid_rerank"]
+        modes = EVAL_MODES
     else:
         modes = [args.mode]
 

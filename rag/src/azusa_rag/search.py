@@ -13,6 +13,7 @@ from .loaders import load_embedding_records, load_documents
 from .config import EMBEDDING_OUTPUT_PATH, QUERY_DIR, HEALTH_URL, SEARCH_URL, INSERT_URL
 from .schemas import EmbeddingRecord
 from .embedder import embed_text_list
+from rank_bm25 import BM25Okapi  # BM25 是一种经典的稀疏检索算法, 这里用它来实现最小 sparse 检索内核. 以后可以替换成更复杂的 sparse 检索器, 比如基于倒排索引的 BM25 或者 TF-IDF.
 import json
 import re
 import urllib.request
@@ -20,6 +21,11 @@ import warnings
 
 from .reranker import score_query_passage_pairs
 
+BM25_TOKEN_PATTERN = re.compile(r"[a-z0-9]+|[\u4e00-\u9fff]")
+# [a-z0-9]+：匹配一段连续的英文小写字母或数字，至少 1 个.  | 表示"或者"
+# [\u4e00-\u9fff]：匹配一个中文汉字字符
+# tokenizer里面已经做了text.lower()了, 所以这里直接在正则里写小写字母就行了.
+# 例如 "Hello, Azusa! 123 你好" 会被切成 ["hello", "azusa", "123", "你", "好"].
 
 def read_json_response(response) -> dict:
     """
@@ -157,14 +163,8 @@ def ts030_sparse_score(query: str, text: str) -> int:
     """
     给一个 query 和一个 text，返回一个整数分数，表示它们有多少关键词重合。
     """
-    query_lower = query.lower() # str(全小写)
-    text_lower = text.lower() # str(全小写)
-    # query_lower = query_lower.split() # 用空格切词, 得到 list[str]
-    # text_lower = text_lower.split() # list[str]
-    # query_set = set(query_lower) # 转成集合
-    # text_set = set(text_lower)
-    # cross_set = query_set & text_set  # 求交集, 算交集大小
-    # return len(cross_set)
+    query_lower = query.lower()
+    text_lower = text.lower()
     query_fragments = ts030_collect_query_fragments(query_lower)
     
     score = 0
@@ -173,7 +173,6 @@ def ts030_sparse_score(query: str, text: str) -> int:
             score += 1
     # TODO:
     # 目前需要query_fragment是text_lower中的子串才能加分, 需要原样出现, 过于严格. 可以把query_fragment进一步往下切分.
-    
     return score
 
 def ts030_collect_query_fragments(query: str) -> list[str]:
@@ -188,6 +187,34 @@ def ts030_collect_query_fragments(query: str) -> list[str]:
             continue
         query_fragments.append(line)
     return query_fragments
+
+def ts030_tokenize_for_bm25(text: str) -> list[str]:
+    """
+    为最小BM25接入准备的轻量tokenizer.
+    - 英文和数字按照连续片段切分
+    - 中文先按照单字切分, 这样不用额外的分词库, 也能有最小可用分词效果
+    """
+    text_lower = text.lower()
+    token_list = BM25_TOKEN_PATTERN.findall(text_lower)
+    filtered_tokens = []
+    for token in token_list:
+        if not token.strip():
+            continue
+        filtered_tokens.append(token)
+    return filtered_tokens
+
+def ts030_build_bm25_index(
+    embedding_records: list[EmbeddingRecord],
+) -> tuple[BM25Okapi, list[list[str]]]:
+    """
+    从当前 embedding_records 构建一个最小 BM25 索引.
+    当前没有实现缓存, 优先保证接通和结果可见.
+    """
+    tokenized_corpus = []  # corpus 是语料库的意思. 该列表的每条记录, 都对应一个token列表(该列表式一个嵌套列表)
+    for embedding_record in embedding_records:
+        tokenized_corpus.append(ts030_tokenize_for_bm25(embedding_record.text))  # embedding_record.text 取出当前记录的正文, 然后送进分词函数, 得到一个token列表, 把这个token列表加入embedding_record
+    bm25_index = BM25Okapi(tokenized_corpus)  # 生成一个BM25Okapi索引对象.可以利用这个对象对query打分和排序.
+    return bm25_index, tokenized_corpus
 
 def ts030_collect_query_tokens(query: str) -> list[str]:
     """
@@ -281,19 +308,26 @@ def ts030_rerank_candidates(
 
 def ts030_search_sparse(query: str, embedding_records_list : list[EmbeddingRecord], top_k = 3) -> list[int]:
     """
-    最小 sparse 检索内核.
-    遍历所有记录, 用轻量词面规则打分, 返回 top-k 的 id.
+    最小 BM25 sparse 检索内核.
+    在 Python 侧临时构建 BM25索引, 返回top-k的id
     """
-    # 遍历每个 embedding_record
-    # 用 ts030_sparse_score(query, record.text) 算分 (直接用文本比对, 而不是取向量)
-    # 记成 (score, id)
-    # 排序
-    # 返回 top-k 的 id
+    query_tokens = ts030_tokenize_for_bm25(query)
+    if not query_tokens:
+        return []
+
+    bm25_index, _ = ts030_build_bm25_index(embedding_records_list)
+    score_array = bm25_index.get_scores(query_tokens)
+    
     score_id_list = []
-    for index, embedding_record in enumerate(embedding_records_list):
-        score = ts030_sparse_score(query, embedding_record.text)
-        record_id = index
-        score_id_list.append((score, record_id))
+    # 旧逻辑: 用 ts030_sparse_score(query, record.text) 算分 (直接用文本比对, 而不是取向量)
+    # for index, embedding_record in enumerate(embedding_records_list):
+    #     score = ts030_sparse_score(query, embedding_record.text)
+    #     record_id = index
+    #     score_id_list.append((score, record_id))
+
+    for record_id, score in enumerate(score_array):
+        score_id_list.append((float(score), record_id))
+    
     score_id_list.sort(key= lambda item:(-item[0], item[1]))
     top_k_list = []
     for (_, record_id) in score_id_list:
@@ -513,8 +547,10 @@ def search(
     elif mode == "hybrid_rerank":
         # hybrid_rerank 在 hybrid 召回的基础上再走一次 rerank 重排.
         top_k_list, _ = ts030_search_hybrid_rerank_with_sources(query, embedding_records, top_k)
+    elif mode == "bm25":
+        top_k_list = ts030_search_sparse(query, embedding_records, top_k)
     else:
-        raise ValueError("Search mode must be brute, hnsw, hybrid, or hybrid_rerank")
+        raise ValueError("Search mode must be bm25, brute, hnsw, hybrid,or hybrid_rerank")
     # 用 id 回查原始 EmbeddingRecord
     result_embedrcd_list = []
     for top_k_id in top_k_list:

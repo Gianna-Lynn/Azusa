@@ -36,6 +36,38 @@ from run_eval import EVAL_MODES, load_eval_cases, run_eval_for_mode
 from run_search import run_search_result
 
 
+MODE_METADATA = {
+    "brute": {
+        "family": "dense-only",
+        "label": "Brute Force Dense",
+        "notes": "直接用向量相似度暴力搜索, 作为最朴素的 dense baseline.",
+    },
+    "hnsw": {
+        "family": "dense-only",
+        "label": "HNSW Dense",
+        "notes": "通过 Rust HNSW 服务执行近似向量检索, 用来观察 ANN 近似检索是否保持效果.",
+    },
+    "bm25": {
+        "family": "sparse-only",
+        "label": "BM25 Sparse",
+        "notes": "只依赖词面匹配的 BM25 baseline, 适合观察专有名词、年份和字面命中收益.",
+    },
+    "hybrid": {
+        "family": "dense+sparse",
+        "label": "Hybrid",
+        "notes": "先召回 dense 和 BM25 sparse, 再按当前 merge 策略合并去重.",
+    },
+    "hybrid_rerank": {
+        "family": "dense+sparse+rerank",
+        "label": "Hybrid Rerank",
+        "notes": "在 hybrid 候选集基础上再做 rerank, 用来观察排序纠偏收益.",
+    },
+}
+
+MODE_DISPLAY_ORDER = ["brute", "hnsw", "bm25", "hybrid", "hybrid_rerank"]
+MODE_ORDER_INDEX = {mode: index for index, mode in enumerate(MODE_DISPLAY_ORDER)}
+
+
 DEFAULT_ANSWER_CHECKS = [
     {
         "case_id": "massachusetts",
@@ -160,6 +192,40 @@ def run_optional_steps(args: argparse.Namespace) -> dict:
     return step_summary
 
 
+def get_mode_order_key(mode: str) -> tuple[int, str]:
+    """
+    返回 mode 的稳定展示顺序.
+    未登记的 mode 仍然能安全排到最后.
+    """
+    return (MODE_ORDER_INDEX.get(mode, len(MODE_DISPLAY_ORDER)), mode)
+
+
+def build_mode_catalog(modes: list[str]) -> list[dict]:
+    """
+    为 workflow 报告生成一份 mode 说明表.
+    """
+    catalog = []
+    for mode in modes:
+        metadata = MODE_METADATA.get(
+            mode,
+            {
+                "family": "unknown",
+                "label": mode,
+                "notes": "No mode description available.",
+            },
+        )
+        catalog.append(
+            {
+                "mode": mode,
+                "family": metadata["family"],
+                "label": metadata["label"],
+                "notes": metadata["notes"],
+            }
+        )
+    catalog.sort(key=lambda item: get_mode_order_key(item["mode"]))
+    return catalog
+
+
 def build_mode_ranking(mode_summaries: dict[str, dict]) -> list[dict]:
     """
     把各个 mode 的总体指标压成一个可排序列表。
@@ -187,7 +253,7 @@ def build_mode_ranking(mode_summaries: dict[str, dict]) -> list[dict]:
             -item["avg_mrr"],
             -item["avg_recall_at_k"],
             -item["avg_hit_at_k"],
-            item["mode"],
+            get_mode_order_key(item["mode"]),
         )
     )
     return ranking_items
@@ -455,6 +521,7 @@ def build_workflow_summary(args: argparse.Namespace) -> dict:
             "requested_modes": args.modes,
             "completed_modes": list(mode_summaries.keys()),
             "failed_modes": failed_modes,
+            "mode_catalog": build_mode_catalog(args.modes),
             "baseline_mode": baseline_mode,
             "mode_ranking_by_mrr": ranking,
             "delta_vs_baseline": delta_vs_baseline,
@@ -499,18 +566,43 @@ def build_markdown_report(summary: dict) -> str:
         )
     lines.append("")
 
+    lines.append("## Mode Guide")
+    lines.append("")
+    mode_catalog = summary["eval"].get("mode_catalog", [])
+    if not mode_catalog:
+        lines.append("- 当前没有可展示的 mode 说明。")
+    else:
+        lines.append("| mode | family | label | notes |")
+        lines.append("| --- | --- | --- | --- |")
+        for mode_item in mode_catalog:
+            lines.append(
+                "| "
+                + mode_item["mode"]
+                + " | "
+                + mode_item["family"]
+                + " | "
+                + mode_item["label"]
+                + " | "
+                + mode_item["notes"]
+                + " |"
+            )
+    lines.append("")
+
     lines.append("## Metric Ranking")
     lines.append("")
     if not summary["eval"]["mode_ranking_by_mrr"]:
         lines.append("- 没有成功完成任何 mode 的评测。")
     else:
         # 先给一个最小总表，让读者先从总体指标看“谁更强”。
-        lines.append("| mode | avg_hit@k | avg_recall@k | avg_mrr |")
-        lines.append("| --- | --- | --- | --- |")
+        lines.append("| mode | family | avg_hit@k | avg_recall@k | avg_mrr |")
+        lines.append("| --- | --- | --- | --- | --- |")
         for ranking_item in summary["eval"]["mode_ranking_by_mrr"]:
+            family = MODE_METADATA.get(ranking_item["mode"], {}).get("family", "unknown")
             lines.append(
                 "| "
                 + ranking_item["mode"]
+                + " | "
+                + family
                 + " | "
                 + format_ratio(ranking_item["avg_hit_at_k"])
                 + " | "
@@ -531,7 +623,12 @@ def build_markdown_report(summary: dict) -> str:
         lines.append("")
         lines.append("| mode | hit delta | recall delta | mrr delta |")
         lines.append("| --- | --- | --- | --- |")
-        for mode, delta_item in summary["eval"]["delta_vs_baseline"].items():
+        ordered_modes = sorted(
+            summary["eval"]["delta_vs_baseline"].keys(),
+            key=get_mode_order_key,
+        )
+        for mode in ordered_modes:
+            delta_item = summary["eval"]["delta_vs_baseline"][mode]
             lines.append(
                 "| "
                 + mode
@@ -576,7 +673,9 @@ def build_markdown_report(summary: dict) -> str:
             lines.append("")
             lines.append("| mode | hit@k | recall@k | mrr | pred |")
             lines.append("| --- | --- | --- | --- | --- |")
-            for mode, mode_item in case_item["per_mode"].items():
+            ordered_modes = sorted(case_item["per_mode"].keys(), key=get_mode_order_key)
+            for mode in ordered_modes:
+                mode_item = case_item["per_mode"][mode]
                 lines.append(
                     "| "
                     + mode
@@ -676,6 +775,21 @@ def print_terminal_summary(summary: dict, summary_path: Path, report_path: Path)
             f"mrr={best_mode['avg_mrr']:.4f}"
         )
         print()
+
+        dense_sparse_modes = [
+            item for item in ranking if item["mode"] in {"brute", "hnsw", "bm25", "hybrid"}
+        ]
+        if dense_sparse_modes:
+            best_pre_rerank = dense_sparse_modes[0]
+            print("best_pre_rerank_mode:")
+            print(
+                f"  mode={best_pre_rerank['mode']} "
+                f"family={MODE_METADATA.get(best_pre_rerank['mode'], {}).get('family', 'unknown')} "
+                f"hit@k={best_pre_rerank['avg_hit_at_k']:.4f} "
+                f"recall@k={best_pre_rerank['avg_recall_at_k']:.4f} "
+                f"mrr={best_pre_rerank['avg_mrr']:.4f}"
+            )
+            print()
 
     disagreement_cases = summary["eval"]["disagreement_cases"]
     if disagreement_cases:

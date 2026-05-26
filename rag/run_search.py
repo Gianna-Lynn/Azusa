@@ -27,7 +27,7 @@ from azusa_rag.search import (
 )
 from azusa_rag.answerer import answer_with_citations
 
-SEARCH_MODES = ["brute", "hnsw", "hybrid", "hybrid_rerank"]
+SEARCH_MODES = ["brute", "hnsw", "hybrid", "hybrid_rerank", "bm25"]
 
 def build_parser() -> argparse.ArgumentParser:
     """

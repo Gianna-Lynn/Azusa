@@ -24,7 +24,7 @@ from azusa_rag.loaders import load_embedding_records
 from azusa_rag.schemas import EmbeddingRecord
 from azusa_rag.search import search
 
-EVAL_MODES = ["brute", "hnsw", "hybrid", "hybrid_rerank"]
+EVAL_MODES = ["brute", "hnsw", "hybrid", "hybrid_rerank", "bm25"]
 
 
 def build_parser() -> argparse.ArgumentParser:

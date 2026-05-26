@@ -6,6 +6,7 @@ description = "The minimal RAG bootstrap of Azusa"
 requires-python = ">=3.11"
 dependencies = [
     "huggingface_hub",
+    "rank_bm25",
     "sentencepiece",
     "torch",
     "transformers",

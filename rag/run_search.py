@@ -20,9 +20,7 @@ from azusa_rag.modes import SEARCH_MODES
 from azusa_rag.schemas import EmbeddingRecord
 from azusa_rag.search import (
     get_query,
-    search,
-    ts030_search_hybrid_rerank_with_sources,
-    ts030_search_hybrid_with_sources,
+    search_records_with_sources,
 )
 from azusa_rag.answerer import answer_with_citations
 
@@ -164,32 +162,12 @@ def run_search_result(
     """
     对单条 query 执行一次完整搜索，并返回统一结果字典。
     """
-    if mode == "hybrid":
-        merged_ids, source_map = ts030_search_hybrid_with_sources(
-            query=query,
-            embedding_records=embedding_records,
-            top_k=top_k,
-        )
-        result_records = []
-        for merged_id in merged_ids:
-            result_records.append(embedding_records[merged_id])
-    elif mode == "hybrid_rerank":
-        merged_ids, source_map = ts030_search_hybrid_rerank_with_sources(
-            query=query,
-            embedding_records=embedding_records,
-            top_k=top_k,
-        )
-        result_records = []
-        for merged_id in merged_ids:
-            result_records.append(embedding_records[merged_id])
-    else:
-        source_map = None
-        result_records = search(
-            query=query,
-            embedding_records=embedding_records,
-            top_k=top_k,
-            mode=mode,
-        )
+    result_records, source_map = search_records_with_sources(
+        query=query,
+        embedding_records=embedding_records,
+        top_k=top_k,
+        mode=mode,
+    )
 
     if with_answer:
         answer_dict = answer_with_citations(

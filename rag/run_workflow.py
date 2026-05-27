@@ -15,12 +15,10 @@ import argparse
 import json
 from datetime import datetime
 from pathlib import Path
-import sys
 
-RAG_ROOT = Path(__file__).resolve().parent
-SRC_DIR = RAG_ROOT / "src"
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
+from bootstrap import ensure_src_path
+
+ensure_src_path()
 
 from azusa_rag.config import (
     EMBEDDING_OUTPUT_PATH,
@@ -32,40 +30,9 @@ from azusa_rag.embed_main import main as embed_main
 from azusa_rag.hf_dataset_import import import_hf_squad_sample
 from azusa_rag.loaders import load_embedding_records
 from azusa_rag.main import main as chunk_main
+from azusa_rag.modes import MODE_METADATA, get_mode_order_key
 from run_eval import EVAL_MODES, load_eval_cases, run_eval_for_mode
 from run_search import run_search_result
-
-
-MODE_METADATA = {
-    "brute": {
-        "family": "dense-only",
-        "label": "Brute Force Dense",
-        "notes": "直接用向量相似度暴力搜索, 作为最朴素的 dense baseline.",
-    },
-    "hnsw": {
-        "family": "dense-only",
-        "label": "HNSW Dense",
-        "notes": "通过 Rust HNSW 服务执行近似向量检索, 用来观察 ANN 近似检索是否保持效果.",
-    },
-    "bm25": {
-        "family": "sparse-only",
-        "label": "BM25 Sparse",
-        "notes": "只依赖词面匹配的 BM25 baseline, 适合观察专有名词、年份和字面命中收益.",
-    },
-    "hybrid": {
-        "family": "dense+sparse",
-        "label": "Hybrid",
-        "notes": "先召回 dense 和 BM25 sparse, 再按当前 merge 策略合并去重.",
-    },
-    "hybrid_rerank": {
-        "family": "dense+sparse+rerank",
-        "label": "Hybrid Rerank",
-        "notes": "在 hybrid 候选集基础上再做 rerank, 用来观察排序纠偏收益.",
-    },
-}
-
-MODE_DISPLAY_ORDER = ["brute", "hnsw", "bm25", "hybrid", "hybrid_rerank"]
-MODE_ORDER_INDEX = {mode: index for index, mode in enumerate(MODE_DISPLAY_ORDER)}
 
 
 DEFAULT_ANSWER_CHECKS = [
@@ -190,16 +157,6 @@ def run_optional_steps(args: argparse.Namespace) -> dict:
         step_summary["import_hf_eval"]["result"] = import_result
 
     return step_summary
-
-
-def get_mode_order_key(mode: str) -> tuple[int, str]:
-    """
-    返回 mode 的稳定展示顺序.
-    未登记的 mode 仍然能安全排到最后.
-    """
-    return (MODE_ORDER_INDEX.get(mode, len(MODE_DISPLAY_ORDER)), mode)
-
-
 def build_mode_catalog(modes: list[str]) -> list[dict]:
     """
     为 workflow 报告生成一份 mode 说明表.

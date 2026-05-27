@@ -12,19 +12,18 @@ MRR 越接近 1.0 越好.
 import argparse
 import json
 from pathlib import Path
-import sys
 
-RAG_ROOT = Path(__file__).resolve().parent
-SRC_DIR = RAG_ROOT / "src"
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
+from bootstrap import ensure_src_path
+
+ensure_src_path()
 
 from azusa_rag.config import EMBEDDING_OUTPUT_PATH, EVAL_RUNS_DIR, PROJECT_ROOT
 from azusa_rag.loaders import load_embedding_records
+from azusa_rag.modes import SEARCH_MODES
 from azusa_rag.schemas import EmbeddingRecord
 from azusa_rag.search import search
 
-EVAL_MODES = ["brute", "hnsw", "hybrid", "hybrid_rerank", "bm25"]
+EVAL_MODES = SEARCH_MODES
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -24,7 +24,6 @@ OUTPUT_DIR = PROJECT_ROOT / "output"
 ARTIFACTS_DIR = OUTPUT_DIR / "artifacts"
 SEARCH_RUNS_DIR = OUTPUT_DIR / "search_runs"
 EVAL_RUNS_DIR = OUTPUT_DIR / "eval_runs"
-SCRATCH_DIR = OUTPUT_DIR / "scratch"
 
 CHUNK_OUTPUT_PATH = ARTIFACTS_DIR / "chunks.jsonl"
 

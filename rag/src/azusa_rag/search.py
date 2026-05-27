@@ -1,6 +1,14 @@
 """
-Public search facade that keeps the external API stable while delegating
-implementation details to smaller retrieval modules.
+这个文件现在是检索层的“门面”。
+
+前面把原来那个很长的 search.py 拆成了多个子模块：
+1. search_common.py：公共 helper
+2. search_hnsw.py：和 Rust azusa_server 交互
+3. search_sparse.py：BM25 sparse + rerank
+4. search_hybrid.py：hybrid / hybrid_rerank 编排
+
+但对外部调用者来说，仍然优先 import 这个文件，避免 run_search.py / run_eval.py
+以及其他调用点都跟着一起改。
 """
 
 from __future__ import annotations
@@ -26,13 +34,15 @@ def search_core_brute(
     top_k: int = 3,
 ) -> list[int]:
     """
-    Run exact dense retrieval over all vectors in Python memory.
+    暴力搜索内核。
+    接受 query 向量和全部候选向量，返回最优的 top-k 个 id。
     """
     score_id_list = []
     for record_id, vector in search_vecs:
         score = dot_product(query_vec, vector)
         score_id_list.append((score, record_id))
 
+    # sort 包含 tie-break 逻辑：分数相同的时候让 id 小的在前面，避免结果抖动。
     score_id_list.sort(key=lambda item: (-item[0], item[1]))
     return [record_id for _, record_id in score_id_list[:top_k]]
 
@@ -43,7 +53,8 @@ def ts030_search_sparse(
     top_k: int = 3,
 ) -> list[int]:
     """
-    Compatibility wrapper around the sparse BM25 retrieval helper.
+    兼容旧调用点的 wrapper。
+    真实实现已经拆到 search_sparse.py。
     """
     return search_sparse(query, embedding_records, top_k)
 
@@ -54,7 +65,8 @@ def ts030_search_hybrid_with_sources(
     top_k: int,
 ) -> tuple[list[int], list[dict]]:
     """
-    Compatibility wrapper for the hybrid retrieval helper.
+    兼容旧调用点的 wrapper。
+    真实实现已经拆到 search_hybrid.py。
     """
     return search_hybrid_with_sources(query, embedding_records, top_k)
 
@@ -65,7 +77,8 @@ def ts030_search_hybrid_rerank_with_sources(
     top_k: int,
 ) -> tuple[list[int], list[dict]]:
     """
-    Compatibility wrapper for the hybrid+rereank retrieval helper.
+    兼容旧调用点的 wrapper。
+    真实实现已经拆到 search_hybrid.py。
     """
     return search_hybrid_rerank_with_sources(query, embedding_records, top_k)
 
@@ -77,19 +90,25 @@ def search(
     mode: str = "brute",
 ) -> list[EmbeddingRecord]:
     """
-    Complete retrieval flow that chooses one backend by mode.
+    完整的搜索流程。
+    按 mode 选择 brute / hnsw / hybrid / hybrid_rerank / bm25，
+    最终返回 EmbeddingRecord 列表。
     """
+    # query -> query vector
     query_vec = embed_query(query=query)
+    # embedding_records -> search vectors
     search_vecs = build_search_vecs(embedding_records=embedding_records)
 
     if mode == "brute":
         top_k_list = search_core_brute(query_vec=query_vec, search_vecs=search_vecs, top_k=top_k)
     elif mode == "hnsw":
+        # hnsw 需要先确保 azusa_server 里已经装好当前这批 embedding。
         ensure_hnsw_index_loaded(embedding_records)
         top_k_list = search_core_hnsw(query_vec=query_vec, top_k=top_k)
     elif mode == "hybrid":
         top_k_list, _ = ts030_search_hybrid_with_sources(query, embedding_records, top_k)
     elif mode == "hybrid_rerank":
+        # hybrid_rerank 在 hybrid 召回的基础上再走一次 rerank 重排。
         top_k_list, _ = ts030_search_hybrid_rerank_with_sources(query, embedding_records, top_k)
     elif mode == "bm25":
         top_k_list = ts030_search_sparse(query, embedding_records, top_k)
@@ -110,7 +129,7 @@ def main() -> None:
     )
 
     for result in result_list:
-        print(result.text)
+        print(result.text)  # dataclass 不是字典，需要用 . 访问，而不是 [] 访问
 
 
 if __name__ == "__main__":

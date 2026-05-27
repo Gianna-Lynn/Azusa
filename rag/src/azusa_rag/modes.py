@@ -1,5 +1,10 @@
 """
-Shared retrieval mode definitions for CLI scripts and reports.
+集中维护检索 mode 的公共定义。
+
+这样 run_eval.py、run_search.py、run_workflow.py 就不用各自维护一份：
+- mode 列表
+- 展示顺序
+- mode 的说明文字
 """
 
 from __future__ import annotations
@@ -39,6 +44,7 @@ MODE_METADATA = {
 
 def get_mode_order_key(mode: str) -> tuple[int, str]:
     """
-    Return a stable display order for retrieval modes.
+    返回 mode 的稳定展示顺序。
+    未登记的 mode 仍然能安全排到最后。
     """
     return (MODE_ORDER_INDEX.get(mode, len(MODE_DISPLAY_ORDER)), mode)

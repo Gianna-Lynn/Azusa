@@ -42,6 +42,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(PROJECT_ROOT / "data" / "eval" / "min_eval.jsonl"),
     )
     parser.add_argument(
+        "--embedding-path",
+        default=str(EMBEDDING_OUTPUT_PATH),
+        help="Path to the embedding jsonl used for evaluation. Defaults to output/artifacts/embedding.jsonl.",
+    )
+    parser.add_argument(
         "--output-name",
         default=None,
         help="Optional custom output basename. Omit it to overwrite the default fixed output file for the chosen mode.",
@@ -201,7 +206,8 @@ def main() -> None:
 
     eval_path = Path(args.eval_path)
     eval_cases = load_eval_cases(eval_path)
-    embedding_records = load_embedding_records(EMBEDDING_OUTPUT_PATH)
+    # 这里允许评测直接指向一份单独的 embedding 产物，避免覆盖默认主链路数据。
+    embedding_records = load_embedding_records(Path(args.embedding_path))
 
     if args.mode == "all":
         modes = EVAL_MODES

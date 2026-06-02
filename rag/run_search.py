@@ -36,6 +36,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional custom output basename. Omit it to overwrite the default fixed output file for the chosen mode.",
     )
+    parser.add_argument(
+        "--embedding-path",
+        default=str(EMBEDDING_OUTPUT_PATH),
+        help="Path to the embedding jsonl used for retrieval. Defaults to output/artifacts/embedding.jsonl.",
+    )
     parser.add_argument("--with-answer", action="store_true", help="Whether to run the answerer on top of search results.")
     query_group = parser.add_mutually_exclusive_group()
     query_group.add_argument("--query-text", help="Use an explicit query string instead of the default query file.")
@@ -192,7 +197,8 @@ def main() -> None:
     args = parser.parse_args()
 
     query = load_query_text(args)
-    embedding_records = load_embedding_records(EMBEDDING_OUTPUT_PATH)
+    # 这里允许显式切换 embedding 输入，方便我们单独验证 DuRetrieval 这类新链路。
+    embedding_records = load_embedding_records(Path(args.embedding_path))
     result_dict = run_search_result(
         query=query,
         embedding_records=embedding_records,

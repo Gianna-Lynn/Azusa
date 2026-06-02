@@ -39,7 +39,7 @@ def load_documents(files_path: Path) -> list[dict]:
 
     for txt_path in txt_paths:
         text = load_text_file(txt_path)
-
+  
         if not text.strip():
             continue
 

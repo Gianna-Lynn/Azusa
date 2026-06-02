@@ -1,0 +1,158 @@
+DuRetrieval toy importer progress summary
+
+1. Goal of the toy stage
+We deliberately did not jump straight to a full importer.
+The goal was to understand the core mapping step by step:
+
+- corpus: rows with id + text
+- queries: rows with id + text
+- qrels: rows with qid + pid + score
+
+We wanted to first build:
+
+eval_records = [
+    {
+        "query_id": "...",
+        "query": "...",
+        "relevant_chunk_ids": [...]
+    }
+]
+
+2. What was built first
+We started from pure in-memory toy lists, not real files and not the real Azusa pipeline.
+
+We implemented build_eval_records(...), whose job is:
+
+- read query text from queries
+- read relevance links from qrels
+- build eval_records
+
+Core meaning:
+
+- queries + qrels -> eval_records
+
+3. Validation rules added to build_eval_records
+The toy importer now applies these rules:
+
+- only keep qrels with score > 0
+- qrel.qid must exist in queries.id
+- qrel.pid must exist in corpus.id
+- duplicate pid under the same query is not added twice
+
+Important interpretation:
+
+- we are NOT requiring every corpus id to appear in qrels
+- we are requiring every pid that appears in qrels to be a valid corpus id
+- similarly, every qid that appears in qrels must be a valid queries id
+
+4. Why corpus had to "participate"
+At first corpus was not really used.
+Later we made corpus participate by checking:
+
+- is qrel.pid present in corpus.id set?
+
+Reason:
+If a gold pid does not exist in the corpus, retrieval can never hit it.
+
+5. Upgrade from in-memory toy data to toy file input
+We created a toy JSON file:
+
+rag/data/toy/du_retrieval_toy.json
+
+Its shape is:
+
+{
+  "corpus": [...],
+  "queries": [...],
+  "qrels": [...]
+}
+
+Then we changed the script so it reads this toy JSON and extracts:
+
+- corpus
+- queries
+- qrels
+
+6. Output already completed
+We added JSONL writing for eval output and confirmed it works.
+
+Current toy eval output:
+
+rag/output/toy/du_retrieval_eval.jsonl
+
+Meaning:
+
+- toy JSON input -> corpus / queries / qrels
+- build_eval_records(...)
+- write eval JSONL
+
+7. Second builder that we discussed
+We also introduced:
+
+build_passage_records(corpus)
+
+Its job is different from build_eval_records(...).
+
+Meaning:
+
+- build_eval_records(...) defines what counts as correct
+- build_passage_records(...) defines what passages are retrievable
+
+Core mapping:
+
+- corpus -> passage_records
+- queries + qrels -> eval_records
+
+Critical id alignment:
+
+- corpus.id -> passage_record.chunk_id
+- qrels.pid -> eval_record.relevant_chunk_ids
+
+These ids must live in the same "world" so gold ids can point to real retrievable passages.
+
+8. Current understanding of the two functions
+build_eval_records(...):
+
+- output = evaluation gold records
+- answers the question: what counts as a correct retrieval result?
+
+build_passage_records(...):
+
+- output = retrieval corpus records
+- answers the question: what text units are actually available to retrieve?
+
+9. Current state of the toy importer
+The toy script has already reached this stage:
+
+- reads rag/data/toy/du_retrieval_toy.json
+- builds eval_records
+- writes rag/output/toy/du_retrieval_eval.jsonl
+
+The build_passage_records(corpus) function has also been written in simple form:
+
+{
+    "doc_id": "du_retrieval",
+    "chunk_id": passage["id"],
+    "chunk_index": index,
+    "source": "toy_du_retrieval",
+    "page": None,
+    "text": passage["text"],
+}
+
+10. Suggested next step for the next conversation
+The most natural next step is:
+
+- connect build_passage_records(corpus) into main()
+- print or write toy passage output
+
+Suggested toy output path:
+
+rag/output/toy/du_retrieval_passages.jsonl
+
+That would complete:
+
+- toy JSON input
+- eval JSONL output
+- passage JSONL output
+
+before moving on to more formal validation or real DuRetrieval data.

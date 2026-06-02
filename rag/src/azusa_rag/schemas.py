@@ -1,5 +1,5 @@
 """
-schemas.py: 定义数据结构
+说明 Azusa在内存中把一条chunk / 一条embedding 记录成什么样的结构.
 """
 
 from dataclasses import asdict, dataclass

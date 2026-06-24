@@ -36,11 +36,11 @@ MULTI_HOP_MARKERS = [
 
 @dataclass
 class QueryPlan:
-    query_type: str
+    query_type: str     # 单跳或者多跳
     original_query: str
     rewritten_query: str
-    retrieval_queries: list[str]
-    notes: list[str]
+    retrieval_queries: list[str]  # 要拆成几条子查询去搜索
+    notes: list[str]              # 备注
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -48,7 +48,7 @@ class QueryPlan:
 
 def normalize_query_text(query: str) -> str:
     """
-    Collapse whitespace and trim common trailing punctuation.
+    Collapse whitespace and trim common trailing punctuation. 清理噪音: 空白和标点
     """
     normalized = re.sub(r"\s+", " ", query).strip()
     return normalized.rstrip(" ?？。")
@@ -56,7 +56,7 @@ def normalize_query_text(query: str) -> str:
 
 def classify_query(query: str) -> str:
     """
-    Minimal deterministic query classifier for Agent v0.
+    Minimal deterministic query classifier for Agent v0. 判断是不是多跳.依靠关键词列表的规则触发, 而不是依靠模型.
     """
     lowered = query.lower()
     if any(marker in lowered for marker in MULTI_HOP_MARKERS):
@@ -66,7 +66,7 @@ def classify_query(query: str) -> str:
 
 def split_multi_hop_query(query: str) -> list[str]:
     """
-    Split obvious compound questions into retrieval-sized subqueries.
+    Split obvious compound questions into retrieval-sized subqueries. 如果是多跳, 按照"和/与/and/.."这些连接词切成多条子查询.
     """
     parts = re.split(
         r"\s*(?:\band\b|\bor\b|\bboth\b|以及|并且|同时|和|与|、|；|;)\s*",
@@ -85,12 +85,12 @@ def build_query_plan(query: str) -> QueryPlan:
     """
     Build the classification + rewrite plan used by the Agent.
     """
-    rewritten_query = normalize_query_text(query)
-    query_type = classify_query(rewritten_query)
+    rewritten_query = normalize_query_text(query)   # 先清理噪音: 空白和标点
+    query_type = classify_query(rewritten_query)    # 判断是不是多跳
     notes = []
 
-    if query_type == "multi_hop":
-        retrieval_queries = split_multi_hop_query(rewritten_query)
+    if query_type == "multi_hop":                                       # 如果是多跳
+        retrieval_queries = split_multi_hop_query(rewritten_query)      # 按照连词断开, 切成多条子查询.
         if len(retrieval_queries) <= 1:
             retrieval_queries = [rewritten_query]
             notes.append("multi_hop_marker_found_but_no_clean_split")
@@ -122,11 +122,15 @@ def fuse_evidence(
 ) -> list[dict]:
     """
     Fuse per-hop retrieval results by repeated hits first, then best rank.
+    多跳检索每一跳都会返回一批chunk, 同一个chunk可能在多跳里都出现过, 需要合并去重, 并重新排序.
     """
     fused_by_chunk_id: dict[str, dict] = {}
 
     for hop_index, hop in enumerate(hop_results, start=1):
         for rank, record in enumerate(hop["records"], start=1):
+            # 使用 dict.setdefault: 如果键 record.chunk_id 已存在, 返回其对应的值;
+            # 否则将第二个参数作为默认值插入到字典中并返回该默认值。
+            # 这里用于合并同一 chunk_id 的记录, 并在第一次遇到时初始化统计字段。
             item = fused_by_chunk_id.setdefault(
                 record.chunk_id,
                 {
@@ -139,21 +143,27 @@ def fuse_evidence(
             )
             item["best_rank"] = min(item["best_rank"], rank)
             item["hit_count"] += 1
-            item["hop_indices"].append(hop_index)
+            item["hop_indices"].append(hop_index)   # 经过的"跳"的列表.
 
             source_map = hop.get("source_map")
             if source_map is not None:
                 item["retrieval_sources"].add(source_map[rank - 1]["source"])
+            # 因为rank从1开始, 而列表下标从0开始, 所以这里是rank - 1
+            # 取出当前排名对应记录的source; record.source来自EmbeddingRecord, 表示这条chunk原始来自哪里.
+            # 使用add()放入集合 retrieval_sources, 自动去重.
 
     fused_items = list(fused_by_chunk_id.values())
-    fused_items.sort(
+    fused_items.sort(                   # 排序逻辑:
         key=lambda item: (
-            -item["hit_count"],
-            item["best_rank"],
-            item["record"].chunk_id,
+            -item["hit_count"],         # 命中次数多的优先. sort默认是升序的.所以为了让高hit_count的在先, 需要取负号
+            item["best_rank"],          # 命中次数相同的, 最优排名靠前的优先. best_rank越小越靠前, rank 1 比 rank 5 更好.
+            item["record"].chunk_id,    # 命中次数, 命中排名都相同的, chunk_id小的优先.
         )
     )
 
+    # 将融合后的候选条目转换为最终的 evidence 列表。
+    # 每个 evidence 包含排名信息、文档/块标识、来源、页码、预览文本与完整文本，
+    # 以及融合元数据（命中次数、最佳排名、经过的跳次索引及检索来源集合）。
     evidence = []
     for rank, item in enumerate(fused_items[:top_k], start=1):
         record = item["record"]
@@ -199,11 +209,11 @@ def run_search_agent(
     """
     Execute Search Agent v0 and return a structured trace.
     """
-    plan = build_query_plan(query)
+    plan = build_query_plan(query)  # 得到Query Plan, 含有多条子查询.
     hop_results = []
 
-    for hop_index, retrieval_query in enumerate(plan.retrieval_queries, start=1):
-        records, source_map = search_records_with_sources(
+    for hop_index, retrieval_query in enumerate(plan.retrieval_queries, start=1): # 对于每一条子查询
+        records, source_map = search_records_with_sources(  # 搜索这一条子查询, 得出这一跳的查询结果.
             query=retrieval_query,
             embedding_records=embedding_records,
             top_k=top_k,
@@ -218,9 +228,9 @@ def run_search_agent(
             }
         )
 
-    evidence = fuse_evidence(hop_results, top_k=top_k)
+    evidence = fuse_evidence(hop_results, top_k=top_k)  # 将多跳检索结果融合成最终的evidence列表, 并排序.
     answer_dict = None
-    if with_answer and evidence:
+    if with_answer and evidence:    # 如果需要生成答案, 且有evidence, 则调用answer_with_citations生成答案.
         from .answerer import answer_with_citations
 
         answer_dict = answer_with_citations(
@@ -253,7 +263,7 @@ def run_search_agent(
         "fused_evidence": evidence,
     }
 
-    if answer_dict is not None:
+    if answer_dict is not None: # 如果生成了答案, 则将答案相关信息加入结果字典.
         result["answer"] = answer_dict["answer_text"]
         result["answer_raw"] = answer_dict["answer_raw"]
         result["answer_citations"] = answer_dict["citation_ids"]

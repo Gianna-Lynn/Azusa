@@ -15,6 +15,7 @@ import argparse
 import json
 from datetime import datetime
 from pathlib import Path
+from time import perf_counter
 
 from bootstrap import ensure_src_path
 
@@ -33,25 +34,6 @@ from azusa_rag.main import main as chunk_main
 from azusa_rag.modes import MODE_METADATA, get_mode_order_key
 from run_eval import EVAL_MODES, load_eval_cases, run_eval_for_mode
 from run_search import run_search_result
-
-
-DEFAULT_ANSWER_CHECKS = [
-    {
-        "case_id": "massachusetts",
-        "query": "In what year did Massachusetts first require children to be educated in schools?",
-        "notes": "英文事实题，适合观察 hybrid_rerank 的 top-k 和 answer 是否对齐。",
-    },
-    {
-        "case_id": "jr_tokyo_metro",
-        "query": "JR常磐缓行线和东京地铁是什么关系？",
-        "notes": "中文证据题，适合观察 answer 是否引用真实 chunk。",
-    },
-    {
-        "case_id": "insufficient",
-        "query": "这份材料有没有明确提到哈佛大学校长的名字？",
-        "notes": "证据不足题，适合观察 answerer 是否保守。",
-    },
-]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -91,6 +73,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--skip-answer-checks",
         action="store_true",
         help="Skip the representative answer + citation verification section.",
+    )
+    parser.add_argument(
+        "--answer-limit",
+        type=int,
+        default=15,
+        help="Maximum number of eval cases to run through answer + citation checks. Use 0 for all.",
+    )
+    parser.add_argument(
+        "--review-path",
+        default=str(PROJECT_ROOT / "data" / "eval" / "min_eval_review.jsonl"),
+        help="Optional manual answer-review JSONL merged into the final report.",
+    )
+    parser.add_argument(
+        "--publish-stage2-docs",
+        action="store_true",
+        help="Also write stable Stage 2 docs to rag/docs/eval_results.md and badcase_v1.md.",
     )
     parser.add_argument(
         "--rebuild-artifacts",
@@ -201,6 +199,8 @@ def build_mode_ranking(mode_summaries: dict[str, dict]) -> list[dict]:
                 "avg_hit_at_k": summary["avg_hit_at_k"],
                 "avg_recall_at_k": summary["avg_recall_at_k"],
                 "avg_mrr": summary["avg_mrr"],
+                "avg_retrieval_latency_ms": summary["avg_retrieval_latency_ms"],
+                "p95_retrieval_latency_ms": summary["p95_retrieval_latency_ms"],
             }
         )
 
@@ -253,6 +253,9 @@ def build_compact_mode_summaries(mode_summaries: dict[str, dict]) -> dict[str, d
             "avg_hit_at_k": summary["avg_hit_at_k"],
             "avg_recall_at_k": summary["avg_recall_at_k"],
             "avg_mrr": summary["avg_mrr"],
+            "avg_retrieval_latency_ms": summary["avg_retrieval_latency_ms"],
+            "p50_retrieval_latency_ms": summary["p50_retrieval_latency_ms"],
+            "p95_retrieval_latency_ms": summary["p95_retrieval_latency_ms"],
         }
 
     return compact_summaries
@@ -333,17 +336,26 @@ def run_answer_checks(
     embedding_records,
     top_k: int,
     answer_mode: str,
+    eval_cases: list[dict],
+    answer_limit: int,
 ) -> list[dict]:
     """
-    用少量代表性 query 验证 answer + citation 是否可工作。
-
-    这里不追求大规模答案层评测，只挑几条最能说明问题的 spot checks：
-    - 英文事实题
-    - 中文证据题
-    - 证据不足题
+    Run answer + citation checks against the same labeled cases used by retrieval eval.
     """
     answer_results = []
-    for answer_case in DEFAULT_ANSWER_CHECKS:
+    selected_cases = eval_cases if answer_limit == 0 else eval_cases[:answer_limit]
+    if selected_cases:
+        # Load the answer model once before timing. This keeps model startup out
+        # of the steady-state per-answer latency metric.
+        run_search_result(
+            query=selected_cases[0]["query"],
+            embedding_records=embedding_records,
+            mode=answer_mode,
+            top_k=top_k,
+            with_answer=True,
+        )
+    for answer_case in selected_cases:
+        answer_started_at = perf_counter()
         result_dict = run_search_result(
             query=answer_case["query"],
             embedding_records=embedding_records,
@@ -351,18 +363,49 @@ def run_answer_checks(
             top_k=top_k,
             with_answer=True,
         )
+        answer_latency_ms = (perf_counter() - answer_started_at) * 1000.0
         answer_results.append(
             {
-                "case_id": answer_case["case_id"],
+                "case_id": answer_case["query_id"],
                 "query": answer_case["query"],
+                "reference_answer": answer_case["reference_answer"],
+                "expected_citations": answer_case["expected_citations"],
+                "case_type": answer_case["case_type"],
                 "notes": answer_case["notes"],
+                "answer_latency_ms": answer_latency_ms,
                 "result": result_dict,
             }
         )
     return answer_results
 
 
-def build_compact_answer_checks(answer_checks: list[dict]) -> list[dict]:
+def load_manual_reviews(review_path: Path) -> dict[str, dict]:
+    """Load optional human review labels keyed by query_id."""
+    if not review_path.exists():
+        return {}
+
+    reviews = {}
+    with review_path.open("r", encoding="utf-8") as review_file:
+        for line_number, line in enumerate(review_file, start=1):
+            line = line.strip()
+            if not line:
+                continue
+            review = json.loads(line)
+            query_id = review.get("query_id")
+            if not query_id:
+                raise ValueError(
+                    f"Manual review line {line_number} has no query_id: {review_path}"
+                )
+            if query_id in reviews:
+                raise ValueError(f"Duplicate manual review query_id: {query_id}")
+            reviews[query_id] = review
+    return reviews
+
+
+def build_compact_answer_checks(
+    answer_checks: list[dict],
+    manual_reviews: dict[str, dict],
+) -> list[dict]:
     """
     只保留 answer spot checks 中最值得快速扫读的字段。
 
@@ -378,19 +421,117 @@ def build_compact_answer_checks(answer_checks: list[dict]) -> list[dict]:
 
     for answer_case in answer_checks:
         result_dict = answer_case["result"]
+        expected_citations = set(answer_case["expected_citations"])
+        answer_citations = set(result_dict.get("answer_citations", []))
+        matched_citations = expected_citations & answer_citations
+        citation_precision = (
+            len(matched_citations) / len(answer_citations) if answer_citations else 0.0
+        )
+        citation_recall = (
+            len(matched_citations) / len(expected_citations)
+            if expected_citations
+            else 1.0
+        )
+        manual_review = manual_reviews.get(answer_case["case_id"])
+        manual_review_is_stale = bool(
+            manual_review
+            and manual_review.get("reviewed_answer") != result_dict.get("answer")
+        )
         compact_checks.append(
             {
                 "case_id": answer_case["case_id"],
                 "query": answer_case["query"],
+                "reference_answer": answer_case["reference_answer"],
+                "expected_citations": answer_case["expected_citations"],
+                "case_type": answer_case["case_type"],
                 "notes": answer_case["notes"],
                 "answer": result_dict.get("answer"),
                 "answer_raw": result_dict.get("answer_raw"),
                 "answer_citations": result_dict.get("answer_citations", []),
                 "top1_chunk_id": result_dict["results"][0]["chunk_id"] if result_dict["results"] else None,
+                "citation_id_precision": citation_precision,
+                "citation_id_recall": citation_recall,
+                "answer_latency_ms": answer_case["answer_latency_ms"],
+                "manual_review": manual_review,
+                "manual_review_is_stale": manual_review_is_stale,
             }
         )
 
     return compact_checks
+
+
+def summarize_answer_checks(answer_checks: list[dict]) -> dict:
+    """Aggregate automatic citation-ID metrics and completed human reviews."""
+    if not answer_checks:
+        return {
+            "case_count": 0,
+            "reviewed_case_count": 0,
+            "answer_accuracy": 0.0,
+            "citation_support_rate": 0.0,
+            "avg_completeness_score": 0.0,
+            "avg_faithfulness_score": 0.0,
+            "avg_citation_id_precision": 0.0,
+            "avg_citation_id_recall": 0.0,
+            "avg_answer_latency_ms": 0.0,
+            "badcase_type_counts": {},
+        }
+
+    valid_reviews = [
+        answer_case["manual_review"]
+        for answer_case in answer_checks
+        if answer_case["manual_review"] is not None
+        and not answer_case["manual_review_is_stale"]
+    ]
+    badcase_type_counts = {}
+    for review in valid_reviews:
+        badcase_type = review.get("badcase_type")
+        if badcase_type:
+            badcase_type_counts[badcase_type] = (
+                badcase_type_counts.get(badcase_type, 0) + 1
+            )
+
+    reviewed_case_count = len(valid_reviews)
+    return {
+        "case_count": len(answer_checks),
+        "reviewed_case_count": reviewed_case_count,
+        "answer_accuracy": (
+            sum(bool(review.get("answer_correct")) for review in valid_reviews)
+            / reviewed_case_count
+            if reviewed_case_count
+            else 0.0
+        ),
+        "citation_support_rate": (
+            sum(bool(review.get("citation_supported")) for review in valid_reviews)
+            / reviewed_case_count
+            if reviewed_case_count
+            else 0.0
+        ),
+        "avg_completeness_score": (
+            sum(review.get("completeness_score", 0) for review in valid_reviews)
+            / reviewed_case_count
+            if reviewed_case_count
+            else 0.0
+        ),
+        "avg_faithfulness_score": (
+            sum(review.get("faithfulness_score", 0) for review in valid_reviews)
+            / reviewed_case_count
+            if reviewed_case_count
+            else 0.0
+        ),
+        "avg_citation_id_precision": sum(
+            answer_case["citation_id_precision"] for answer_case in answer_checks
+        )
+        / len(answer_checks),
+        "avg_citation_id_recall": sum(
+            answer_case["citation_id_recall"] for answer_case in answer_checks
+        )
+        / len(answer_checks),
+        "avg_answer_latency_ms": sum(
+            answer_case["answer_latency_ms"] for answer_case in answer_checks
+        )
+        / len(answer_checks),
+        "badcase_type_counts": badcase_type_counts,
+    }
 
 
 def normalize_workflow_error(error: Exception) -> str:
@@ -417,6 +558,8 @@ def build_workflow_summary(args: argparse.Namespace) -> dict:
 
     eval_path = Path(args.eval_path)
     eval_cases = load_eval_cases(eval_path)
+    review_path = Path(args.review_path)
+    manual_reviews = load_manual_reviews(review_path)
     embedding_records = load_embedding_records(EMBEDDING_OUTPUT_PATH)
 
     mode_summaries = {}
@@ -449,6 +592,8 @@ def build_workflow_summary(args: argparse.Namespace) -> dict:
                 embedding_records=embedding_records,
                 top_k=args.top_k,
                 answer_mode=args.answer_mode,
+                eval_cases=eval_cases,
+                answer_limit=args.answer_limit,
             )
         except Exception as error:
             answer_check_error = normalize_workflow_error(error)
@@ -466,7 +611,14 @@ def build_workflow_summary(args: argparse.Namespace) -> dict:
         all_fail_cases = []
         compact_mode_summaries = {}
 
-    compact_answer_checks = build_compact_answer_checks(answer_checks)
+    compact_answer_checks = build_compact_answer_checks(answer_checks, manual_reviews)
+    answer_metrics = summarize_answer_checks(compact_answer_checks)
+    reviewed_case_count = sum(
+        1
+        for answer_case in compact_answer_checks
+        if answer_case["manual_review"] is not None
+        and not answer_case["manual_review_is_stale"]
+    )
 
     return {
         "workflow_name": args.output_name,
@@ -474,6 +626,7 @@ def build_workflow_summary(args: argparse.Namespace) -> dict:
         "steps": step_summary,
         "eval": {
             "eval_path": str(eval_path),
+            "query_count": len(eval_cases),
             "top_k": args.top_k,
             "requested_modes": args.modes,
             "completed_modes": list(mode_summaries.keys()),
@@ -489,6 +642,15 @@ def build_workflow_summary(args: argparse.Namespace) -> dict:
         "answer_checks": {
             "requested": not args.skip_answer_checks,
             "mode": args.answer_mode,
+            "answer_limit": args.answer_limit,
+            "review_path": str(review_path),
+            "reviewed_case_count": reviewed_case_count,
+            "review_coverage": (
+                reviewed_case_count / len(compact_answer_checks)
+                if compact_answer_checks
+                else 0.0
+            ),
+            "metrics": answer_metrics,
             "error": answer_check_error,
             "cases": compact_answer_checks,
         },
@@ -512,7 +674,28 @@ def build_markdown_report(summary: dict) -> str:
     lines.append(f"- generated_at: `{summary['generated_at']}`")
     lines.append(f"- workflow_name: `{summary['workflow_name']}`")
     lines.append(f"- eval_path: `{summary['eval']['eval_path']}`")
+    lines.append(f"- query_count: `{summary['eval']['query_count']}`")
     lines.append(f"- top_k: `{summary['eval']['top_k']}`")
+    lines.append("")
+
+    lines.append("## Reproduce")
+    lines.append("")
+    lines.append("在本机第一个 PowerShell 窗口启动 Azusa server：")
+    lines.append("")
+    lines.append("```powershell")
+    lines.append("cd F:\\Repositories\\Azusa")
+    lines.append("cargo run --bin azusa_server")
+    lines.append("```")
+    lines.append("")
+    lines.append("在第二个 PowerShell 窗口运行最终 Stage 2 workflow：")
+    lines.append("")
+    lines.append("```powershell")
+    lines.append("cd F:\\Repositories\\Azusa\\rag")
+    lines.append(
+        "D:\\Chuo_Data\\conda_envs\\ChuoEnv\\python.exe run_workflow.py "
+        "--output-name stage2_final --answer-limit 15 --publish-stage2-docs"
+    )
+    lines.append("```")
     lines.append("")
 
     lines.append("## Steps")
@@ -551,8 +734,8 @@ def build_markdown_report(summary: dict) -> str:
         lines.append("- 没有成功完成任何 mode 的评测。")
     else:
         # 先给一个最小总表，让读者先从总体指标看“谁更强”。
-        lines.append("| mode | family | avg_hit@k | avg_recall@k | avg_mrr |")
-        lines.append("| --- | --- | --- | --- | --- |")
+        lines.append("| mode | family | avg_hit@k | avg_recall@k | avg_mrr | avg latency ms | p95 latency ms |")
+        lines.append("| --- | --- | ---: | ---: | ---: | ---: | ---: |")
         for ranking_item in summary["eval"]["mode_ranking_by_mrr"]:
             family = MODE_METADATA.get(ranking_item["mode"], {}).get("family", "unknown")
             lines.append(
@@ -566,6 +749,10 @@ def build_markdown_report(summary: dict) -> str:
                 + format_ratio(ranking_item["avg_recall_at_k"])
                 + " | "
                 + format_ratio(ranking_item["avg_mrr"])
+                + " | "
+                + f"{ranking_item['avg_retrieval_latency_ms']:.3f}"
+                + " | "
+                + f"{ranking_item['p95_retrieval_latency_ms']:.3f}"
                 + " |"
             )
     lines.append("")
@@ -669,14 +856,61 @@ def build_markdown_report(summary: dict) -> str:
         # answer 这里只保留 spot checks，不把整个 answer_context 原样塞进报告里，
         # 否则会让报告重新膨胀成一大堆原文。
         lines.append(f"- answer_mode: `{answer_summary['mode']}`")
+        lines.append(
+            f"- manual_review_coverage: `{answer_summary['reviewed_case_count']}/"
+            f"{len(answer_summary['cases'])}`"
+        )
+        lines.append("")
+        answer_metrics = answer_summary["metrics"]
+        lines.append("| answer metric | value |")
+        lines.append("| --- | ---: |")
+        lines.append(
+            f"| answer accuracy | {answer_metrics['answer_accuracy']:.4f} |"
+        )
+        lines.append(
+            "| citation support rate | "
+            f"{answer_metrics['citation_support_rate']:.4f} |"
+        )
+        lines.append(
+            "| avg completeness (0-2) | "
+            f"{answer_metrics['avg_completeness_score']:.4f} |"
+        )
+        lines.append(
+            "| avg faithfulness (0-2) | "
+            f"{answer_metrics['avg_faithfulness_score']:.4f} |"
+        )
+        lines.append(
+            "| avg citation-ID precision | "
+            f"{answer_metrics['avg_citation_id_precision']:.4f} |"
+        )
+        lines.append(
+            "| avg citation-ID recall | "
+            f"{answer_metrics['avg_citation_id_recall']:.4f} |"
+        )
+        lines.append(
+            "| avg answer latency ms | "
+            f"{answer_metrics['avg_answer_latency_ms']:.3f} |"
+        )
+        lines.append("")
+        lines.append(
+            f"- badcase_type_counts: `{answer_metrics['badcase_type_counts']}`"
+        )
         lines.append("")
         for answer_case in answer_summary["cases"]:
             lines.append(f"### {answer_case['case_id']}")
             lines.append("")
             lines.append(f"- query: {answer_case['query']}")
+            lines.append(f"- reference_answer: {answer_case['reference_answer']}")
             lines.append(f"- notes: {answer_case['notes']}")
             lines.append(f"- answer: {answer_case.get('answer', '')}")
             lines.append(f"- citations: {answer_case.get('answer_citations', [])}")
+            lines.append(
+                "- citation_id_precision/recall: "
+                f"{answer_case['citation_id_precision']:.4f}/"
+                f"{answer_case['citation_id_recall']:.4f}"
+            )
+            lines.append(f"- answer_latency_ms: {answer_case['answer_latency_ms']:.3f}")
+            lines.append(f"- manual_review: {answer_case.get('manual_review')}")
             lines.append(f"- top1: {answer_case.get('top1_chunk_id', 'N/A')}")
             lines.append("")
 
@@ -691,7 +925,87 @@ def build_markdown_report(summary: dict) -> str:
     return "\n".join(lines)
 
 
-def write_output_files(output_name: str, summary: dict) -> tuple[Path, Path]:
+def build_badcase_report(summary: dict) -> str:
+    """Build a compact Stage 2 report focused on retrieval and answer failures."""
+    lines = [
+        "# Stage 2 Badcase v1",
+        "",
+        f"- generated_at: `{summary['generated_at']}`",
+        f"- workflow_name: `{summary['workflow_name']}`",
+        "",
+        "## Retrieval All-Fail Cases",
+        "",
+    ]
+
+    all_fail_cases = summary["eval"]["all_fail_cases"]
+    if not all_fail_cases:
+        lines.append("- 无。")
+    else:
+        for case_item in all_fail_cases:
+            lines.append(f"- `{case_item['query_id']}`: {case_item['query']}")
+    lines.append("")
+
+    lines.extend(["## Retrieval Disagreements", ""])
+    disagreement_cases = summary["eval"]["disagreement_cases"]
+    if not disagreement_cases:
+        lines.append("- 无明显模式分歧。")
+    else:
+        for case_item in disagreement_cases:
+            lines.append(
+                f"- `{case_item['query_id']}`: hit spread="
+                f"{case_item['hit_spread']:.4f}, recall spread="
+                f"{case_item['recall_spread']:.4f}, mrr spread="
+                f"{case_item['mrr_spread']:.4f}"
+            )
+    lines.append("")
+
+    lines.extend(["## Answer and Citation Badcases", ""])
+    answer_badcases = []
+    pending_reviews = []
+    for answer_case in summary["answer_checks"]["cases"]:
+        review = answer_case.get("manual_review")
+        if review is None or answer_case.get("manual_review_is_stale", False):
+            pending_reviews.append(answer_case["case_id"])
+            continue
+        is_badcase = (
+            not review.get("answer_correct", False)
+            or not review.get("citation_supported", False)
+            or review.get("completeness_score", 0) < 2
+            or review.get("faithfulness_score", 0) < 2
+            or bool(review.get("badcase_type"))
+        )
+        if is_badcase:
+            answer_badcases.append((answer_case, review))
+
+    if not answer_badcases:
+        lines.append("- 无已确认的答案层 badcase。")
+    else:
+        for answer_case, review in answer_badcases:
+            lines.append(f"### {answer_case['case_id']}")
+            lines.append("")
+            lines.append(f"- query: {answer_case['query']}")
+            lines.append(f"- reference_answer: {answer_case['reference_answer']}")
+            lines.append(f"- answer: {answer_case.get('answer', '')}")
+            lines.append(f"- citations: {answer_case.get('answer_citations', [])}")
+            lines.append(f"- badcase_type: {review.get('badcase_type')}")
+            lines.append(f"- review_notes: {review.get('review_notes', '')}")
+            lines.append("")
+
+    lines.extend(["## Pending Manual Reviews", ""])
+    if pending_reviews:
+        for case_id in pending_reviews:
+            lines.append(f"- `{case_id}`")
+    else:
+        lines.append("- 无，所有 answer cases 均已人工复核。")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def write_output_files(
+    output_name: str,
+    summary: dict,
+    publish_stage2_docs: bool = False,
+) -> tuple[Path, Path, Path]:
     """
     把 workflow 的两份核心产物写到 output/eval_runs/ 下。
 
@@ -702,22 +1016,39 @@ def write_output_files(output_name: str, summary: dict) -> tuple[Path, Path]:
     EVAL_RUNS_DIR.mkdir(parents=True, exist_ok=True)
     summary_path = EVAL_RUNS_DIR / f"{output_name}_summary.json"
     report_path = EVAL_RUNS_DIR / f"{output_name}_report.md"
+    badcase_path = EVAL_RUNS_DIR / f"{output_name}_badcase_v1.md"
 
     summary_path.write_text(
         json.dumps(summary, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-    report_path.write_text(build_markdown_report(summary), encoding="utf-8")
-    return summary_path, report_path
+    report_text = build_markdown_report(summary)
+    badcase_text = build_badcase_report(summary)
+    report_path.write_text(report_text, encoding="utf-8")
+    badcase_path.write_text(badcase_text, encoding="utf-8")
+
+    if publish_stage2_docs:
+        docs_dir = PROJECT_ROOT / "docs"
+        docs_dir.mkdir(parents=True, exist_ok=True)
+        (docs_dir / "eval_results.md").write_text(report_text, encoding="utf-8")
+        (docs_dir / "badcase_v1.md").write_text(badcase_text, encoding="utf-8")
+
+    return summary_path, report_path, badcase_path
 
 
-def print_terminal_summary(summary: dict, summary_path: Path, report_path: Path) -> None:
+def print_terminal_summary(
+    summary: dict,
+    summary_path: Path,
+    report_path: Path,
+    badcase_path: Path,
+) -> None:
     """
     在终端打印一个精简版摘要，避免用户跑完后还不知道先看什么。
     """
     print(f"workflow_name: {summary['workflow_name']}")
     print(f"summary_json: {summary_path}")
     print(f"report_md: {report_path}")
+    print(f"badcase_md: {badcase_path}")
     print()
 
     ranking = summary["eval"]["mode_ranking_by_mrr"]
@@ -784,8 +1115,12 @@ def main() -> None:
     args = parser.parse_args()
 
     summary = build_workflow_summary(args)
-    summary_path, report_path = write_output_files(args.output_name, summary)
-    print_terminal_summary(summary, summary_path, report_path)
+    summary_path, report_path, badcase_path = write_output_files(
+        args.output_name,
+        summary,
+        publish_stage2_docs=args.publish_stage2_docs,
+    )
+    print_terminal_summary(summary, summary_path, report_path, badcase_path)
 
 
 if __name__ == "__main__":

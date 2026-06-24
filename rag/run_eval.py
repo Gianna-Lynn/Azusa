@@ -11,7 +11,9 @@ MRR 越接近 1.0 越好.
 
 import argparse
 import json
+import math
 from pathlib import Path
+from time import perf_counter
 
 from bootstrap import ensure_src_path
 
@@ -69,6 +71,30 @@ def load_eval_cases(eval_path: Path) -> list[dict]:
     if not eval_cases:
         raise ValueError(f"No eval cases found in {eval_path}")
 
+    required_fields = {
+        "query_id",
+        "query",
+        "reference_answer",
+        "relevant_chunk_ids",
+        "expected_citations",
+        "case_type",
+    }
+    seen_query_ids = set()
+    for index, eval_case in enumerate(eval_cases, start=1):
+        missing_fields = sorted(required_fields - eval_case.keys())
+        if missing_fields:
+            raise ValueError(
+                f"Eval case #{index} is missing required fields: {missing_fields}"
+            )
+        query_id = eval_case["query_id"]
+        if query_id in seen_query_ids:
+            raise ValueError(f"Duplicate query_id in eval set: {query_id}")
+        seen_query_ids.add(query_id)
+        if not eval_case["relevant_chunk_ids"]:
+            raise ValueError(f"Eval case {query_id} has no relevant_chunk_ids")
+        if not eval_case["expected_citations"]:
+            raise ValueError(f"Eval case {query_id} has no expected_citations")
+
     return eval_cases
 
 
@@ -93,7 +119,12 @@ def reciprocal_rank(retrieved_chunk_ids: list[str], relevant_chunk_ids: set[str]
     return 0.0
 
 
-def evaluate_case(query_case: dict, retrieved_chunk_ids: list[str], top_k: int) -> dict:
+def evaluate_case(
+    query_case: dict,
+    retrieved_chunk_ids: list[str],
+    top_k: int,
+    retrieval_latency_ms: float,
+) -> dict:
     """
     计算单条 query 的最小评测指标.
     """
@@ -111,6 +142,9 @@ def evaluate_case(query_case: dict, retrieved_chunk_ids: list[str], top_k: int) 
     return {
         "query_id": query_case["query_id"],
         "query": query_case["query"],
+        "reference_answer": query_case["reference_answer"],
+        "expected_citations": query_case["expected_citations"],
+        "case_type": query_case["case_type"],
         "top_k": top_k,
         "relevant_chunk_ids": query_case["relevant_chunk_ids"],
         "retrieved_chunk_ids": retrieved_top_k,
@@ -118,8 +152,18 @@ def evaluate_case(query_case: dict, retrieved_chunk_ids: list[str], top_k: int) 
         "hit_at_k": hit_at_k,
         "recall_at_k": recall_at_k,
         "mrr": mrr,
+        "retrieval_latency_ms": retrieval_latency_ms,
         "notes": query_case.get("notes"), # 有些样本可能没有备注"notes", 因此这里选用了get, 保证如果没有"notes"也不会报错.
     }
+
+
+def percentile(values: list[float], ratio: float) -> float:
+    """Return a nearest-rank percentile without adding a statistics dependency."""
+    if not values:
+        return 0.0
+    ordered_values = sorted(values)
+    rank = max(1, math.ceil(len(ordered_values) * ratio))
+    return ordered_values[rank - 1]
 
 
 def summarize_case_results(case_results: list[dict], mode: str, top_k: int) -> dict:
@@ -130,11 +174,13 @@ def summarize_case_results(case_results: list[dict], mode: str, top_k: int) -> d
     total_hit_at_k = 0.0
     total_recall_at_k = 0.0
     total_mrr = 0.0
+    latencies_ms = []
 
     for case_result in case_results:
         total_hit_at_k += case_result["hit_at_k"]
         total_recall_at_k += case_result["recall_at_k"]
         total_mrr += case_result["mrr"]
+        latencies_ms.append(case_result["retrieval_latency_ms"])
 
     return {
         "mode": mode,
@@ -143,6 +189,10 @@ def summarize_case_results(case_results: list[dict], mode: str, top_k: int) -> d
         "avg_hit_at_k": total_hit_at_k / query_count,
         "avg_recall_at_k": total_recall_at_k / query_count,
         "avg_mrr": total_mrr / query_count,
+        "total_retrieval_latency_ms": sum(latencies_ms),
+        "avg_retrieval_latency_ms": sum(latencies_ms) / query_count,
+        "p50_retrieval_latency_ms": percentile(latencies_ms, 0.50),
+        "p95_retrieval_latency_ms": percentile(latencies_ms, 0.95),
         "cases": case_results,
     }
 
@@ -156,16 +206,34 @@ def run_eval_for_mode(
     """
     对单个 mode 执行整套最小评测.
     """
+    # Warm up lazy model loading, reranker initialization, and HNSW index
+    # population before measuring per-query latency. These are setup costs,
+    # not steady-state retrieval latency, and would otherwise only penalize
+    # whichever mode happens to run first.
+    search(
+        query=eval_cases[0]["query"],
+        embedding_records=embedding_records,
+        top_k=top_k,
+        mode=mode,
+    )
+
     case_results = []
     for query_case in eval_cases:
+        retrieval_started_at = perf_counter()
         result_records = search(
             query=query_case["query"],
             embedding_records=embedding_records,
             top_k=top_k,
             mode=mode,
         )
+        retrieval_latency_ms = (perf_counter() - retrieval_started_at) * 1000.0
         retrieved_chunk_ids = extract_chunk_ids(result_records)
-        case_result = evaluate_case(query_case, retrieved_chunk_ids, top_k)
+        case_result = evaluate_case(
+            query_case,
+            retrieved_chunk_ids,
+            top_k,
+            retrieval_latency_ms,
+        )
         case_results.append(case_result)
 
     return summarize_case_results(case_results, mode, top_k)
@@ -181,6 +249,8 @@ def print_eval_summary(summary: dict) -> None:
     print(f"avg_hit@k: {summary['avg_hit_at_k']:.4f}")
     print(f"avg_recall@k: {summary['avg_recall_at_k']:.4f}")
     print(f"avg_mrr: {summary['avg_mrr']:.4f}")
+    print(f"avg_retrieval_latency_ms: {summary['avg_retrieval_latency_ms']:.3f}")
+    print(f"p95_retrieval_latency_ms: {summary['p95_retrieval_latency_ms']:.3f}")
     print()
 
     for case_result in summary["cases"]:

@@ -10,18 +10,22 @@ Azusa是一个基于HNSW (Hierarchical Navigable Small World, 分层可导航小
 
 目前实现了:
 
-基于查询向量query, 在向量数据库中检索出k个与query比较相似的向量.
+- Rust library 中的 HNSW 索引: 支持插入向量记录, 按 query 检索 top-k 近邻, 返回 id / score, 并可按 id 取回 metadata.
+- SIFT1M benchmark: 支持读取 SIFT1M base/query/groundtruth, 构建 HNSW 索引, 搜索并计算 recall@k / exact@k, 输出 Markdown 和 CSV 报告.
+- Rust HTTP demo 服务: 提供最小 `health -> insert -> search -> record` 闭环, 适合验证服务化调用路径.
+- RAG 子项目: 在 Azusa HNSW 服务之上补了一条最小检索/问答实验链路.
 
-在SIFT1M全量1M向量上进行建图和搜索, 并利用官方groundtruth验证正确性.
-
-仓库内还补了一条最小 RAG 检索链路, 当前已经支持:
+RAG 子项目当前已经支持:
 
 - `raw txt -> chunks.jsonl -> embedding.jsonl`
-- Python 侧 `brute` / Rust HTTP `hnsw` 两种检索模式
-- 一个最小 `hybrid` 骨架, 能合并 dense 与 sparse 结果, 并给结果标注来源
+- `brute / hnsw / bm25 / hybrid / hybrid_rerank` 检索
+- 最小检索评测: `Hit@k / Recall@k / MRR`
+- 最小 `answer + citation`
+- Search Agent v0: query classification / query rewrite / multi-hop retrieval / evidence fusion
 
 相关文档:
 
+- Benchmark 说明见 `docs/benchmark.md`
 - RAG 子项目说明见 `rag/README.md`
 - HTTP 服务接口说明见 `docs/azusa_server_readme.md`
 
@@ -126,59 +130,58 @@ ef_construction越大, 找邻居的时候看得更宽, 建图质量更好, 召�
 
 后期的benchmark方法利用sift1m的groundtruth参考答案来评分. 
 
-运行benchmark:
+日常推荐使用独立 benchmark binary, 它会验证 HTTP 服务之前的 HNSW 主链路:
 
-cargo test --release test_hnsw_in_sift1m -- --nocapture
+```powershell
+cargo run --release --bin sift1m_benchmark -- --mode hnsw --base-limit 100000 --query-limit 100 --ks 5 --ef-search 60,100,300 --m 4 --ef-construction 80
+```
+
+快速 smoke benchmark:
+
+```powershell
+cargo run --release --bin sift1m_benchmark -- --mode hnsw --base-limit 1000 --query-limit 10 --k 5 --ef-search 60 --m 4 --ef-construction 80
+```
+
+输出位置:
+
+```text
+target/benchmark/sift1m.md
+target/benchmark/sift1m.csv
+```
+
+更多命令和历史结果见 `docs/benchmark.md`.
 
 ## Benchmark结果
 
-| ef_search | recall@5 | exact@5 | avg_search_time |
-| --- | --- | --- | --- |
-| 60 | 68.2% | 34% | 257μs |
-| 300 | 91.2% | 68% | 669μ |
-
-Experiment: `SIFT1M recall sweep on full 1M base with official groundtruth`
-
-- base_limit: `1000000`
-- k: `5`
-- query_limit: `100`
-- ef_construction: `80`
-- m: `4`
-- m_max: `8`
-- metric: `L2`
-- command: `cargo test --release test_hnsw_in_sift1m -- --nocapture`
-- change: 将主测试切到官方 `sift_groundtruth.ivecs` 参考答案, 并把 `base_limit` 提升到 `1000000`
-
-#### **Build Summary**
-
-| item | value |
-| --- | --- |
-| build_index time | 392.8317633s |
-| ground truth time | 1.2822ms |
-| insert count | 1000000 |
-
-#### **Insert Timings**
-
-| phase | time | share |
-| --- | --- | --- |
-| greedy_search | 34.18s | 8.8% |
-| search_layer | 327.47s | 83.8% |
-
-#### **Query Results**
+当前日常复测优先看 `base_limit=100000, query_limit=100, k=5` 的结果:
 
 | ef_search | total_search_time | avg_search_time | recall@5 | exact@5 |
 | --- | --- | --- | --- | --- |
-| 60 | 25.7881ms | 257.881us | 68.2% | 34% |
-| 80 | 26.7733ms | 267.733us | 75.2% | 38% |
-| 100 | 29.9425ms | 299.425us | 78.4% | 41% |
-| 150 | 39.8614ms | 398.614us | 84.0% | 53% |
-| 200 | 48.3276ms | 483.276us | 87.6% | 61% |
-| 300 | 66.9292ms | 669.292us | 91.2% | 68% |
+| 60 | 12.9318ms | 129.318us | 87.0% | 62/100 |
+| 100 | 22.8890ms | 228.890us | 92.2% | 75/100 |
+| 300 | 52.2015ms | 522.015us | 97.0% | 89/100 |
+
+已有全量 1M sweep 记录保留在 `docs/archive/perf_logs.md` 和 `docs/benchmark.md` 中. 摘要如下:
+
+| config | build time | ef_search=60 recall@10 / exact@10 | ef_search=100 recall@10 / exact@10 | ef_search=300 recall@10 / exact@10 |
+| --- | --- | --- | --- | --- |
+| m8_efc100 | 1251.370706978s | 89.40% / 49/100 | 94.90% / 68/100 | 99.40% / 91/100 |
+| m16_efc100 | 3055.649133404s | 97.50% / 76/100 | 99.20% / 89/100 | 99.80% / 94/100 |
+| m16_efc200 | 4668.71236162s | 97.80% / 78/100 | 99.20% / 90/100 | 99.90% / 95/100 |
 
 ## 当前局限
 
-目前还没有并发和服务化.
+- HTTP 服务目前是内存索引, 服务重启后记录会丢失.
+- 暂无持久化、删除、更新、批量导入和并发压测.
+- 当前 HTTP 接口只覆盖最小 demo 闭环, 还没有发布独立 OpenAPI / protobuf schema.
+- SIFT1M 原始数据不随仓库提交, benchmark 依赖本机或服务器上的 `data/sift1m/sift/`.
+- RAG 子项目仍是实验链路, 重点用于验证检索模式、rerank、answer 和 agent 编排, 还不是完整应用.
 
 ## 下一步路线
 
-目前还只是完成了"检索”, 并没有完成"关系”的组织, 还没有实现和元数据的真正链接, 谈不上是一个完整的数据库.
+接下来优先把 Azusa 从"可验证的 HNSW 检索内核"推进到"更像数据库/检索服务"的形态:
+
+- 为 HTTP 服务补持久化、批量导入、删除/更新和更完整的错误处理.
+- 为服务接口补 schema 文档和更系统的 smoke / integration test.
+- 继续用 SIFT1M benchmark 追踪 HNSW 的质量和性能回归.
+- 让 RAG 实验链路继续反向检验 HNSW 服务在真实文本检索场景中的可用性.

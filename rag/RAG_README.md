@@ -15,6 +15,8 @@
   生成 `embedding.jsonl`
 - `run_search.py`
   看单条 query 的检索 / answer 结果
+- `run_agent.py`
+  跑 Search Agent v0：query classification / query rewrite / multi-hop retrieval / evidence fusion
 - `run_eval.py`
   看批量检索指标
 - `run_workflow.py`
@@ -75,6 +77,17 @@ python run_search.py --mode hybrid_rerank --top-k 3 --with-answer
 产物：
 
 - `output/search_runs/search_result_<mode>.json`
+
+### 2.5 跑 Search Agent v0
+
+```powershell
+python run_agent.py --mode bm25 --top-k 5 --query-text "first question and second question"
+python run_agent.py --mode hybrid_rerank --top-k 5 --with-answer
+```
+
+产物：
+
+- `output/search_runs/search_agent_v0_<mode>.json`
 
 ### 3. 跑批量评测
 

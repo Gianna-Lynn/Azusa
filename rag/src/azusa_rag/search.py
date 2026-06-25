@@ -47,42 +47,6 @@ def search_core_brute(
     return [record_id for _, record_id in score_id_list[:top_k]]
 
 
-def ts030_search_sparse(
-    query: str,
-    embedding_records: list[EmbeddingRecord],
-    top_k: int = 3,
-) -> list[int]:
-    """
-    兼容旧调用点的 wrapper。
-    真实实现已经拆到 search_sparse.py。
-    """
-    return search_sparse(query, embedding_records, top_k)
-
-
-def ts030_search_hybrid_with_sources(
-    query: str,
-    embedding_records: list[EmbeddingRecord],
-    top_k: int,
-) -> tuple[list[int], list[dict]]:
-    """
-    兼容旧调用点的 wrapper。
-    真实实现已经拆到 search_hybrid.py。
-    """
-    return search_hybrid_with_sources(query, embedding_records, top_k)
-
-
-def ts030_search_hybrid_rerank_with_sources(
-    query: str,
-    embedding_records: list[EmbeddingRecord],
-    top_k: int,
-) -> tuple[list[int], list[dict]]:
-    """
-    兼容旧调用点的 wrapper。
-    真实实现已经拆到 search_hybrid.py。
-    """
-    return search_hybrid_rerank_with_sources(query, embedding_records, top_k)
-
-
 def search_records_with_sources(
     query: str,
     embedding_records: list[EmbeddingRecord],
@@ -107,12 +71,12 @@ def search_records_with_sources(
         top_k_list = search_core_hnsw(query_vec=query_vec, top_k=top_k)
         source_map = None
     elif mode == "hybrid":
-        top_k_list, source_map = ts030_search_hybrid_with_sources(query, embedding_records, top_k)
+        top_k_list, source_map = search_hybrid_with_sources(query, embedding_records, top_k)
     elif mode == "hybrid_rerank":
         # hybrid_rerank 在 hybrid 召回的基础上再走一次 rerank 重排。
-        top_k_list, source_map = ts030_search_hybrid_rerank_with_sources(query, embedding_records, top_k)
+        top_k_list, source_map = search_hybrid_rerank_with_sources(query, embedding_records, top_k)
     elif mode == "bm25":
-        top_k_list = ts030_search_sparse(query, embedding_records, top_k)
+        top_k_list = search_sparse(query, embedding_records, top_k)
         source_map = None
     else:
         raise ValueError("Search mode must be bm25, brute, hnsw, hybrid,or hybrid_rerank")

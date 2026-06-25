@@ -74,7 +74,7 @@ Rust HTTP 服务是当前阶段最小、最直接的交付方式：
 如果 HTTP 服务来不及稳定交付，保留以下独立 artifact 作为降级交付：
 
 - Rust library 中的 `HnswIndex` 插入和搜索能力。
-- `legacy_demo` 或现有测试展示的基础检索路径。
+- 现有 smoke test 展示的基础检索路径。
 - `sift1m_benchmark` 和 SIFT1M 实验记录，证明索引可构建、可搜索、可评估。
 - 文档中明确说明 HTTP 服务未完成，Rust library + demo/benchmark 作为当前阶段成果。
 

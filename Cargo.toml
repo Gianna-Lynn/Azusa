@@ -8,16 +8,15 @@ name = "azusa"
 path = "src/lib.rs"
 
 [[bin]]
-name = "legacy_demo"
-path = "src/bin/legacy_demo.rs"
-
-[[bin]]
 name = "sift1m_benchmark"
 path = "benchmark/sift1m_benchmark.rs"
 
 [[bin]]
 name = "azusa_server"
 path = "src/bin/azusa_server.rs"
+
+[features]
+legacy = []
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }

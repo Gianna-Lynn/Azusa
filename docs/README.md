@@ -1,64 +1,54 @@
-# Docs Guide
+# Azusa
 
-这份索引用来回答一个简单问题：现在在 Azusa 里，应该先看哪些文档。
+特急Azusa(あずさ、梓)是JR东日本中央本线(特急)列车, 常见于新宿至松本区段.  东京是我心中的理想国. 用这个列车名来命名我的第一个向量数据库项目, 就显得再好不过了.
 
-## First Read
+Azusa 是一个基于 HNSW 的向量检索 / RAG 实验项目。
 
-如果只想快速进入当前项目状态，优先看这几份：
+当前主线分两层：
 
-1. `docs/AZUSA_README.md`
-2. `rag/RAG_README.md`
-3. `rag/docs/eval_results.md`
-4. `rag/docs/badcase_v1.md`
+- Rust HNSW：内存索引、top-k 检索、metadata 查询、HTTP demo 服务。
+- Python RAG：chunk -> embedding -> retrieval -> rerank -> answer -> agent。
 
-它们分别回答：
+## 快速入口
 
-- Azusa 整体是什么
-- RAG 子项目怎么跑；优先使用 `rag/run.py` 这个统一入口
-- Stage 2 当前结论是什么
-- Stage 2 主要 badcase 在哪里
+Rust 服务：
 
-## Keep vs Archive
+```powershell
+cargo run --bin azusa_server
+```
 
-### Keep
+RAG 子项目：
 
-- `docs/AZUSA_README.md`: 当前项目总览
-- `docs/azusa_server_readme.md`: Rust HTTP demo / API 示例
-- `docs/benchmark.md`: benchmark 运行方式与结果入口
-- `docs/interface_decision.md`: 为什么当前选 HTTP 服务
-- `docs/stage1_summary.md`: Stage 1 收口与复验记录
-- `rag/RAG_README.md`: RAG 子项目入口
-- `rag/docs/eval_results.md`: 当前稳定的 Stage 2 评测说明
-- `rag/docs/badcase_v1.md`: 当前稳定的 Stage 2 badcase 汇总
+```powershell
+cd rag
+python run.py --help
+```
 
-### Archive / Generated
+SIFT1M benchmark：
 
-- `docs/archive/`: 历史记录、学习笔记、旧实验留档
-- `rag/docs/archive/`: 历史提交说明等非当前主线文档
-- `tests/archive/`: 旧测试套件留档
-- `rag/output/search_runs/latest/`: 单条 query / agent 默认覆盖的最新运行输出目录；首次运行对应命令时自动创建
-- `rag/output/search_runs/archive/`: 旧 search / agent 输出留档
-- `rag/output/eval_runs/latest/`: 主 workflow 默认覆盖的最新运行输出目录；首次运行对应命令时自动创建
-- `rag/output/eval_runs/archive/`: 旧运行输出留档
-- `rag/data/processed/du_retrieval_workflow/latest/`: DuRetrieval workflow 默认覆盖的最新运行输出目录；首次运行对应 workflow 时自动创建
-- `rag/data/processed/du_retrieval_workflow/runs/`: DuRetrieval 命名运行副本；首次保留命名副本时自动创建
-- `rag/data/import_snapshots/hf_eval/latest/`: HF 样本导入脚本默认覆盖的最新运行输出目录；首次运行导入命令时自动创建
-- `rag/data/import_snapshots/hf_eval/runs/`: HF 样本导入脚本命名运行副本；首次保留命名副本时自动创建
-- `rag/data/processed/*.json`: 本地样本快照或其他辅助数据，不作为正式文档
-- `target/benchmark/*.md`: benchmark 生成物，不作为正式文档
+```powershell
+cargo run --release --bin sift1m_benchmark -- --mode hnsw --base-limit 1000 --query-limit 10 --k 5 --ef-search 60 --m 4 --ef-construction 80
+```
 
-## Practical Reading Order
+## 当前能力
 
-按目的来读会更省力：
+- `HnswIndex` 支持插入向量记录、搜索 top-k、返回 id / score、按 id 取 metadata。
+- `azusa_server` 提供最小 `health -> insert -> search -> record` HTTP 闭环。
+- `sift1m_benchmark` 支持 recall@k / exact@k 复测，并输出 Markdown / CSV。
+- `rag/run.py` 统一调度 chunk、embed、search、eval、workflow、agent。
 
-- 想知道项目全貌：`docs/AZUSA_README.md`
-- 想跑 RAG：`rag/RAG_README.md`
-- 想看当前效果：`rag/docs/eval_results.md`
-- 想看失败样例：`rag/docs/badcase_v1.md`
-- 想看 Rust benchmark：`docs/benchmark.md` + `docs/archive/perf_logs.md`
-- 想看接口设计原因：`docs/interface_decision.md`
+## 文档入口
 
-## Notes
+- RAG 怎么跑：`rag/RAG_README.md`
+- HTTP API：`docs/http_api.md`
+- Benchmark：`docs/benchmark.md`
+- 当前 RAG badcase：`rag/docs/badcase_v1.md`
 
-- `CLAUDE.md` 是 agent 使用的项目级说明，不等于面向人的主文档首页。
-- `archive` 里的内容默认不是“当前首先该看”的文档，只在追历史、查决策或翻旧实验时再看。
+历史说明、阶段总结、接口取舍和长报告都放在 `docs/archive/` 或 `rag/docs/archive/`。
+
+## 当前限制
+
+- HTTP 服务仍是内存索引，服务重启后记录会丢失。
+- 暂无持久化、删除、更新、批量导入和并发压测。
+- SIFT1M 原始数据不随仓库提交，benchmark 依赖本机或服务器上的 `data/sift1m/sift/`。
+- RAG 子项目仍是实验链路，还不是完整应用。

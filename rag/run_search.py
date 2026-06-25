@@ -14,7 +14,7 @@ from bootstrap import ensure_src_path
 
 ensure_src_path()
 
-from azusa_rag.config import EMBEDDING_OUTPUT_PATH, SEARCH_RUNS_DIR
+from azusa_rag.config import EMBEDDING_OUTPUT_PATH, LATEST_SEARCH_RUN_DIR, SEARCH_RUNS_DIR
 from azusa_rag.loaders import load_embedding_records
 from azusa_rag.modes import SEARCH_MODES
 from azusa_rag.schemas import EmbeddingRecord
@@ -34,7 +34,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-name",
         default=None,
-        help="Optional custom output basename. Omit it to overwrite the default fixed output file for the chosen mode.",
+        help=(
+            "Optional logical run name. By default results are overwritten under "
+            "output/search_runs/latest/."
+        ),
+    )
+    parser.add_argument(
+        "--keep-run-copy",
+        action="store_true",
+        help="Also keep a named copy under output/search_runs/ for this run.",
     )
     parser.add_argument(
         "--embedding-path",
@@ -157,6 +165,26 @@ def write_result_json(output_path: Path, result_dict: dict) -> None:
     output_path.write_text(output_text, encoding="utf-8")
 
 
+def write_search_outputs(
+    mode: str,
+    result_dict: dict,
+    output_name: str | None,
+    keep_run_copy: bool,
+) -> tuple[Path, Path | None]:
+    """
+    默认把搜索结果写到 latest 目录；只有显式要求时才额外保留命名副本。
+    """
+    latest_path = LATEST_SEARCH_RUN_DIR / f"search_result_{mode}.json"
+    write_result_json(latest_path, result_dict)
+
+    run_copy_path = None
+    if keep_run_copy and output_name:
+        run_copy_path = SEARCH_RUNS_DIR / f"{output_name}_{mode}.json"
+        write_result_json(run_copy_path, result_dict)
+
+    return latest_path, run_copy_path
+
+
 def run_search_result(
     query: str,
     embedding_records: list[EmbeddingRecord],
@@ -209,11 +237,15 @@ def main() -> None:
 
     print_results(result_dict)
 
-    output_name = args.output_name or "search_result"
-    output_path = SEARCH_RUNS_DIR / f"{output_name}_{args.mode}.json"
-    write_result_json(output_path, result_dict)
-
-    print(f"saved to: {output_path}")
+    latest_path, run_copy_path = write_search_outputs(
+        mode=args.mode,
+        result_dict=result_dict,
+        output_name=args.output_name,
+        keep_run_copy=args.keep_run_copy,
+    )
+    print(f"saved to: {latest_path}")
+    if run_copy_path is not None:
+        print(f"named copy: {run_copy_path}")
 
 
 if __name__ == "__main__":

@@ -33,29 +33,32 @@ All scripts run from inside `rag/` with the `ChuoEnv` conda environment activate
 ```powershell
 cd rag
 
+# Unified entrypoint (preferred)
+python run.py --help
+
 # Step 1: Chunk raw documents → output/artifacts/chunks.jsonl
-python run_main.py
+python run.py chunk
 
 # Step 2: Embed chunks → output/artifacts/embedding.jsonl
-python run_embed.py
+python run.py embed
 
 # Step 3: Search with a query (--mode: brute/hnsw/hybrid/hybrid_rerank/bm25)
-python run_search.py --mode hybrid_rerank
+python run.py search --mode hybrid_rerank
 
 # Step 4: Evaluate all modes on an eval set
-python run_eval.py
+python run.py eval
 
 # Step 5: Full end-to-end workflow (chunk + embed + eval all modes)
-python run_workflow.py
+python run.py workflow
 
 # Step 6: Run Search Agent v0 (query classification + rewrite + multi-hop + fusion)
-python run_agent.py --mode hybrid_rerank --with-answer --query-text "your query"
+python run.py agent --mode hybrid_rerank --with-answer --query-text "your query"
 
-# Import HF SQuAD eval set into data/eval/
-python run_import_hf_eval.py
+# Import HF SQuAD eval set into data/import_snapshots/hf_eval/latest/
+python run.py import-hf-eval
 
 # DuRetrieval workflow
-python run_du_retrieval_workflow.py
+python run.py du-retrieval-workflow
 ```
 
 **Install Python package (editable, from `rag/`):**
@@ -117,9 +120,12 @@ loaders.py → chunker.py → embedder.py → search_*.py → reranker.py → an
 | `data/eval/hf_squad_sample_eval.jsonl` | 5-query HF SQuAD smoke set |
 | `data/queries/` | Ad-hoc query files |
 | `data/toy/` | DuRetrieval toy dataset |
+| `data/import_snapshots/hf_eval/latest/` | Default overwrite target for HF eval import snapshots |
 | `output/artifacts/` | `chunks.jsonl`, `embedding.jsonl` (generated) |
-| `output/eval_runs/` | Per-mode eval JSONs, `workflow_report.md`, `eval_results.md` |
-| `output/search_runs/` | Per-query search result JSONs |
+| `output/eval_runs/latest/` | Default overwrite target for the consolidated workflow report |
+| `output/eval_runs/archive/` | Old generated eval outputs |
+| `output/search_runs/latest/` | Default overwrite target for per-query search and agent result JSONs |
+| `output/search_runs/archive/` | Old generated search and agent outputs |
 
 ### Model Configuration (`config.py`)
 

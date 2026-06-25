@@ -19,7 +19,7 @@ from bootstrap import ensure_src_path
 
 ensure_src_path()
 
-from azusa_rag.config import EMBEDDING_OUTPUT_PATH, EVAL_RUNS_DIR, PROJECT_ROOT
+from azusa_rag.config import EMBEDDING_OUTPUT_PATH, EVAL_RUNS_DIR, LATEST_EVAL_RUN_DIR, PROJECT_ROOT
 from azusa_rag.loaders import load_embedding_records
 from azusa_rag.modes import SEARCH_MODES
 from azusa_rag.schemas import EmbeddingRecord
@@ -51,7 +51,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-name",
         default=None,
-        help="Optional custom output basename. Omit it to overwrite the default fixed output file for the chosen mode.",
+        help=(
+            "Optional logical run name. By default results are overwritten under "
+            "output/eval_runs/latest/."
+        ),
+    )
+    parser.add_argument(
+        "--keep-run-copy",
+        action="store_true",
+        help="Also keep a named copy under output/eval_runs/ for this run.",
     )
     return parser
 
@@ -270,6 +278,26 @@ def write_eval_json(output_path: Path, summary_dict: dict) -> None:
     output_path.write_text(output_text, encoding="utf-8")
 
 
+def write_eval_outputs(
+    mode: str,
+    summary_dict: dict,
+    output_name: str | None,
+    keep_run_copy: bool,
+) -> tuple[Path, Path | None]:
+    """
+    默认把评测结果写到 latest 目录；只有显式要求时才额外保留命名副本。
+    """
+    latest_path = LATEST_EVAL_RUN_DIR / f"eval_result_{mode}.json"
+    write_eval_json(latest_path, summary_dict)
+
+    run_copy_path = None
+    if keep_run_copy and output_name:
+        run_copy_path = EVAL_RUNS_DIR / f"{output_name}_{mode}.json"
+        write_eval_json(run_copy_path, summary_dict)
+
+    return latest_path, run_copy_path
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
@@ -310,10 +338,15 @@ def main() -> None:
 
         print_eval_summary(summary)
 
-        output_name = args.output_name or "eval_result"
-        output_path = EVAL_RUNS_DIR / f"{output_name}_{mode}.json"
-        write_eval_json(output_path, summary)
-        print(f"saved to: {output_path}")
+        latest_path, run_copy_path = write_eval_outputs(
+            mode=mode,
+            summary_dict=summary,
+            output_name=args.output_name,
+            keep_run_copy=args.keep_run_copy,
+        )
+        print(f"saved to: {latest_path}")
+        if run_copy_path is not None:
+            print(f"named copy: {run_copy_path}")
         print()
 
     if failed_modes:

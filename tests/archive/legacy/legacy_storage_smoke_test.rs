@@ -11,7 +11,7 @@
 use azusa::legacy::search::flat::search_flat;
 use azusa::legacy::storage::inmemory::InMemoryVectorStore;
 
-const LEGACY_STORAGE_FIXTURE_PATH: &str = "tests/legacy/fixtures/test_vectors.json";
+const LEGACY_STORAGE_FIXTURE_PATH: &str = "tests/archive/legacy/fixtures/test_vectors.json";
 
 #[test]
 fn simple_insert_and_search() {

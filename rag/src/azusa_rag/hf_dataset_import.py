@@ -16,7 +16,15 @@ from urllib.parse import urlencode
 import urllib.request
 
 from .chunker import chunk_text_with_spans
-from .config import CHUNK_OVERLAP, CHUNK_SIZE, PROJECT_ROOT, QUERY_DIR, RAW_DATA_DIR
+from .config import (
+    CHUNK_OVERLAP,
+    CHUNK_SIZE,
+    HF_IMPORT_LATEST_DIR,
+    HF_IMPORT_RUNS_DIR,
+    PROJECT_ROOT,
+    QUERY_DIR,
+    RAW_DATA_DIR,
+)
 
 
 DATASET_ROWS_API = "https://datasets-server.huggingface.co/rows"
@@ -231,6 +239,7 @@ def import_hf_squad_sample(
     length: int,
     raw_dir: Path,
     eval_path: Path,
+    query_dir: Path,
     query_limit: int,
 ) -> dict[str, Any]:
     """
@@ -253,7 +262,7 @@ def import_hf_squad_sample(
     )
     write_eval_jsonl(eval_path, eval_cases)
     write_query_samples(
-        query_dir=QUERY_DIR,
+        query_dir=query_dir,
         eval_cases=eval_cases,
         prefix=dataset_slug,
         limit=query_limit,
@@ -267,6 +276,7 @@ def import_hf_squad_sample(
         "imported_cases": len(eval_cases),
         "raw_dir": str(raw_dir),
         "eval_path": str(eval_path),
+        "query_dir": str(query_dir),
     }
 
 
@@ -282,13 +292,45 @@ def main() -> None:
     parser.add_argument("--split", default="validation")
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--length", type=int, default=20)
-    parser.add_argument("--raw-dir", default=str(RAW_DATA_DIR))
+    parser.add_argument(
+        "--output-name",
+        default="hf_squad_sample",
+        help=(
+            "Logical import name. By default outputs are overwritten under "
+            "data/import_snapshots/hf_eval/latest/."
+        ),
+    )
+    parser.add_argument(
+        "--keep-run-copy",
+        action="store_true",
+        help="Write this import under data/import_snapshots/hf_eval/runs/<output-name>/.",
+    )
+    parser.add_argument("--raw-dir", default=None)
     parser.add_argument(
         "--eval-path",
-        default=str(PROJECT_ROOT / "data" / "eval" / "hf_squad_sample_eval.jsonl"),
+        default=None,
     )
+    parser.add_argument("--query-dir", default=None)
     parser.add_argument("--query-limit", type=int, default=3)
     args = parser.parse_args()  # 解析命令行参数, 这样用户在命令行调用这个脚本时就可以指定要导入哪个 dataset/config/split 的数据, 从哪个 offset 开始, 导入多少条, 以及 raw txt 和 eval jsonl 的保存位置.
+
+    if args.raw_dir is not None or args.eval_path is not None or args.query_dir is not None:
+        raw_dir = Path(args.raw_dir) if args.raw_dir is not None else RAW_DATA_DIR
+        eval_path = (
+            Path(args.eval_path)
+            if args.eval_path is not None
+            else PROJECT_ROOT / "data" / "eval" / "hf_squad_sample_eval.jsonl"
+        )
+        query_dir = Path(args.query_dir) if args.query_dir is not None else QUERY_DIR
+    else:
+        import_dir = (
+            HF_IMPORT_RUNS_DIR / args.output_name
+            if args.keep_run_copy
+            else HF_IMPORT_LATEST_DIR
+        )
+        raw_dir = import_dir / "raw"
+        eval_path = import_dir / "eval.jsonl"
+        query_dir = import_dir / "queries"
 
     result = import_hf_squad_sample(
         dataset=args.dataset,
@@ -296,8 +338,9 @@ def main() -> None:
         split=args.split,
         offset=args.offset,
         length=args.length,
-        raw_dir=Path(args.raw_dir),
-        eval_path=Path(args.eval_path),
+        raw_dir=raw_dir,
+        eval_path=eval_path,
+        query_dir=query_dir,
         query_limit=args.query_limit,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2)) # indent=2 参数让输出的 JSON 字符串更易读, 每个键值对占一行, 并且有缩进.

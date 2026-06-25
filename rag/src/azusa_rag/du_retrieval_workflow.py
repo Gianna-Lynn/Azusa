@@ -19,7 +19,12 @@ from datetime import datetime
 from pathlib import Path
 from urllib.error import URLError
 
-from .config import HEALTH_URL, PROJECT_ROOT
+from .config import (
+    DU_RETRIEVAL_LATEST_DIR,
+    DU_RETRIEVAL_RUNS_DIR,
+    HEALTH_URL,
+    PROJECT_ROOT,
+)
 from .du_retrieval_download import (
     DATASET_DU_RETRIEVAL,
     DATASET_DU_RETRIEVAL_QRELS,
@@ -71,7 +76,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-prefix",
         default="du_retrieval_sample_small",
-        help="Prefix used for generated intermediate and report files under data/processed.",
+        help=(
+            "Logical workflow name. By default generated files are overwritten "
+            "under data/processed/du_retrieval_workflow/latest/."
+        ),
+    )
+    parser.add_argument(
+        "--keep-run-copy",
+        action="store_true",
+        help="Write this run under data/processed/du_retrieval_workflow/runs/<output-prefix>/.",
     )
     parser.add_argument(
         "--compare-query",
@@ -356,17 +369,22 @@ def print_terminal_summary(summary: dict, summary_path: Path, report_path: Path)
 def main() -> None:
     args = build_parser().parse_args()
 
-    processed_dir = PROJECT_ROOT / "data" / "processed"
+    output_dir = (
+        DU_RETRIEVAL_RUNS_DIR / args.output_prefix
+        if args.keep_run_copy
+        else DU_RETRIEVAL_LATEST_DIR
+    )
+    output_dir.mkdir(parents=True, exist_ok=True)
     sample_json_path = Path(args.sample_json_path)
-    passages_output_path = processed_dir / f"{args.output_prefix}_passages.jsonl"
-    eval_output_path = processed_dir / f"{args.output_prefix}_eval.jsonl"
-    embedding_output_path = processed_dir / f"{args.output_prefix}_embedding.jsonl"
-    bm25_eval_path = processed_dir / f"{args.output_prefix}_bm25.json"
-    hybrid_eval_path = processed_dir / f"{args.output_prefix}_hybrid_rerank.json"
-    bm25_search_path = processed_dir / f"{args.output_prefix}_search_bm25.json"
-    hybrid_search_path = processed_dir / f"{args.output_prefix}_search_hybrid_rerank_answer.json"
-    summary_path = processed_dir / f"{args.output_prefix}_workflow_summary.json"
-    report_path = processed_dir / f"{args.output_prefix}_workflow_report.md"
+    passages_output_path = output_dir / "passages.jsonl"
+    eval_output_path = output_dir / "eval.jsonl"
+    embedding_output_path = output_dir / "embedding.jsonl"
+    bm25_eval_path = output_dir / "bm25.json"
+    hybrid_eval_path = output_dir / "hybrid_rerank.json"
+    bm25_search_path = output_dir / "search_bm25.json"
+    hybrid_search_path = output_dir / "search_hybrid_rerank_answer.json"
+    summary_path = output_dir / "workflow_summary.json"
+    report_path = output_dir / "workflow_report.md"
 
     steps = {
         "download_sample": {"status": "skipped"},

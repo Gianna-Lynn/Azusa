@@ -24,6 +24,7 @@ ensure_src_path()
 from azusa_rag.config import (
     EMBEDDING_OUTPUT_PATH,
     EVAL_RUNS_DIR,
+    LATEST_EVAL_RUN_DIR,
     PROJECT_ROOT,
     RAW_DATA_DIR,
 )
@@ -54,7 +55,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-name",
         default="workflow",
-        help="Basename of the consolidated workflow outputs under output/eval_runs/.",
+        help=(
+            "Logical workflow name stored in reports. By default outputs are "
+            "overwritten under output/eval_runs/latest/."
+        ),
+    )
+    parser.add_argument(
+        "--keep-run-copy",
+        action="store_true",
+        help="Also keep a named copy under output/eval_runs/ for this run.",
     )
     parser.add_argument(
         "--modes",
@@ -149,6 +158,7 @@ def run_optional_steps(args: argparse.Namespace) -> dict:
             length=args.length,
             raw_dir=RAW_DATA_DIR,
             eval_path=Path(PROJECT_ROOT / "data" / "eval" / "hf_squad_sample_eval.jsonl"),
+            query_dir=Path(PROJECT_ROOT / "data" / "queries"),
             query_limit=args.query_limit,
         )
         step_summary["import_hf_eval"]["status"] = "completed"
@@ -1005,18 +1015,19 @@ def write_output_files(
     output_name: str,
     summary: dict,
     publish_stage2_docs: bool = False,
+    keep_run_copy: bool = False,
 ) -> tuple[Path, Path, Path]:
     """
-    把 workflow 的两份核心产物写到 output/eval_runs/ 下。
+    把 workflow 的核心产物写到固定 latest 目录。
 
     返回值：
     - summary_path: 结构化 JSON 汇总
     - report_path: 供人快速扫读的 Markdown 报告
     """
-    EVAL_RUNS_DIR.mkdir(parents=True, exist_ok=True)
-    summary_path = EVAL_RUNS_DIR / f"{output_name}_summary.json"
-    report_path = EVAL_RUNS_DIR / f"{output_name}_report.md"
-    badcase_path = EVAL_RUNS_DIR / f"{output_name}_badcase_v1.md"
+    LATEST_EVAL_RUN_DIR.mkdir(parents=True, exist_ok=True)
+    summary_path = LATEST_EVAL_RUN_DIR / "summary.json"
+    report_path = LATEST_EVAL_RUN_DIR / "report.md"
+    badcase_path = LATEST_EVAL_RUN_DIR / "badcase_v1.md"
 
     summary_path.write_text(
         json.dumps(summary, ensure_ascii=False, indent=2),
@@ -1026,6 +1037,18 @@ def write_output_files(
     badcase_text = build_badcase_report(summary)
     report_path.write_text(report_text, encoding="utf-8")
     badcase_path.write_text(badcase_text, encoding="utf-8")
+
+    if keep_run_copy:
+        EVAL_RUNS_DIR.mkdir(parents=True, exist_ok=True)
+        run_summary_path = EVAL_RUNS_DIR / f"{output_name}_summary.json"
+        run_report_path = EVAL_RUNS_DIR / f"{output_name}_report.md"
+        run_badcase_path = EVAL_RUNS_DIR / f"{output_name}_badcase_v1.md"
+        run_summary_path.write_text(
+            json.dumps(summary, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        run_report_path.write_text(report_text, encoding="utf-8")
+        run_badcase_path.write_text(badcase_text, encoding="utf-8")
 
     if publish_stage2_docs:
         docs_dir = PROJECT_ROOT / "docs"
@@ -1119,6 +1142,7 @@ def main() -> None:
         args.output_name,
         summary,
         publish_stage2_docs=args.publish_stage2_docs,
+        keep_run_copy=args.keep_run_copy,
     )
     print_terminal_summary(summary, summary_path, report_path, badcase_path)
 

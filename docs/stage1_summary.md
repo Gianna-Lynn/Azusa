@@ -11,13 +11,13 @@ Stage 1 的目标是把 Azusa 从一个可运行的 HNSW 原型，整理成一�
 
 ## 交付物
 
-- 项目说明：`docs/README.md`（当前工作树中的后续重命名 WIP 不计入本次 Stage 1 收口）
+- 项目说明：`docs/AZUSA_README.md`
 - HTTP demo：`docs/azusa_server_readme.md`
 - HTTP smoke：`scripts/http_smoke_test.ps1`
 - 接口决策：`docs/interface_decision.md`
 - Benchmark 说明：`docs/benchmark.md`
 - 历史性能记录：`docs/archive/perf_logs.md`
-- 简历描述：`docs/resume_bullets.md`
+- 简历描述：`docs/archive/resume_bullets.md`
 
 ## 2026-06-24 本机复验
 

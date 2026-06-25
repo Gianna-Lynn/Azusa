@@ -26,7 +26,7 @@ RAG 子项目当前已经支持:
 相关文档:
 
 - Benchmark 说明见 `docs/benchmark.md`
-- RAG 子项目说明见 `rag/README.md`
+- RAG 子项目说明见 `rag/RAG_README.md`（当前优先使用 `rag/run.py` 作为统一入口）
 - HTTP 服务接口说明见 `docs/azusa_server_readme.md`
 
 ## HNSW原理

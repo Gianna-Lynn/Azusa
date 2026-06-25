@@ -11,7 +11,7 @@ from bootstrap import ensure_src_path
 ensure_src_path()
 
 from azusa_rag.agent import run_search_agent
-from azusa_rag.config import EMBEDDING_OUTPUT_PATH, SEARCH_RUNS_DIR
+from azusa_rag.config import EMBEDDING_OUTPUT_PATH, LATEST_SEARCH_RUN_DIR, SEARCH_RUNS_DIR
 from azusa_rag.loaders import load_embedding_records
 from azusa_rag.modes import SEARCH_MODES
 from azusa_rag.search import get_query
@@ -29,8 +29,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--output-name",
-        default="search_agent_v0",
-        help="Output basename under output/search_runs.",
+        default=None,
+        help=(
+            "Optional logical run name. By default results are overwritten under "
+            "output/search_runs/latest/."
+        ),
+    )
+    parser.add_argument(
+        "--keep-run-copy",
+        action="store_true",
+        help="Also keep a named copy under output/search_runs/ for this run.",
     )
     query_group = parser.add_mutually_exclusive_group()
     query_group.add_argument("--query-text")
@@ -80,6 +88,28 @@ def print_agent_summary(result: dict, output_path: Path) -> None:
     print(f"saved to: {output_path}")
 
 
+def write_agent_outputs(
+    mode: str,
+    result: dict,
+    output_name: str | None,
+    keep_run_copy: bool,
+) -> tuple[Path, Path | None]:
+    """
+    默认把 agent 结果写到 latest 目录；只有显式要求时才额外保留命名副本。
+    """
+    LATEST_SEARCH_RUN_DIR.mkdir(parents=True, exist_ok=True)
+    latest_path = LATEST_SEARCH_RUN_DIR / f"search_agent_v0_{mode}.json"
+    latest_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    run_copy_path = None
+    if keep_run_copy and output_name:
+        SEARCH_RUNS_DIR.mkdir(parents=True, exist_ok=True)
+        run_copy_path = SEARCH_RUNS_DIR / f"{output_name}_{mode}.json"
+        run_copy_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    return latest_path, run_copy_path
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
@@ -94,10 +124,15 @@ def main() -> None:
         with_answer=args.with_answer,
     )
 
-    SEARCH_RUNS_DIR.mkdir(parents=True, exist_ok=True)
-    output_path = SEARCH_RUNS_DIR / f"{args.output_name}_{args.mode}.json"
-    output_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-    print_agent_summary(result, output_path)
+    latest_path, run_copy_path = write_agent_outputs(
+        mode=args.mode,
+        result=result,
+        output_name=args.output_name,
+        keep_run_copy=args.keep_run_copy,
+    )
+    print_agent_summary(result, latest_path)
+    if run_copy_path is not None:
+        print(f"named copy: {run_copy_path}")
 
 
 if __name__ == "__main__":

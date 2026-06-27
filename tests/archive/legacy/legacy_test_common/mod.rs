@@ -3,7 +3,7 @@
 // 这些 helper 只服务于旧版手搓数据集测试，不属于正式测试基础设施。
 
 use azusa::{
-    distance::similarity,
+    distance::metric_similarity,
     index::hnsw::HnswIndex,
     types::{Id, Metric, Vector},
 };
@@ -48,8 +48,8 @@ pub fn build_index(
 pub fn ideal_answer_generator(case: &HnswTestCase, query: &Vector, top_k: usize) -> Vec<Id> {
     let mut nodes_data_vec = case.nodes_data.clone();
     nodes_data_vec.sort_by(|node1, node2| {
-        let score1 = similarity(query, &node1.1, TEST_METRIC);
-        let score2 = similarity(query, &node2.1, TEST_METRIC);
+        let score1 = metric_similarity(query, &node1.1, TEST_METRIC);
+        let score2 = metric_similarity(query, &node2.1, TEST_METRIC);
         match score2.partial_cmp(&score1).unwrap() {
             std::cmp::Ordering::Equal => node1.0.cmp(&node2.0),
             other => other,

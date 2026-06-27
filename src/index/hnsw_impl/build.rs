@@ -13,9 +13,11 @@ use crate::{
 use super::super::{HnswIndex, HnswNode, SearchLayerWorkspace};
 
 impl HnswIndex {
-    // HNSW 会给每个新节点随机采样一个最高层级。
-    // 层级越高，节点越少；层级越低，节点越密集。
-    // 这个采样过程决定了“新节点会参与到哪些层的建图”。
+    /// 随机生成新节点的最高层级。
+    ///
+    /// HNSW 会给每个新节点随机采样一个最高层级。
+    /// 层级越高，节点越少；层级越低，节点越密集。
+    /// 这个采样过程决定了“新节点会参与到哪些层的建图”。
     pub fn sample_level(&mut self) -> usize {
         let mut level = 0usize;
         while self.rng.gen_bool(self.level_sample_probability) {
@@ -24,8 +26,10 @@ impl HnswIndex {
         level
     }
 
-    // 入口函数1: 只提供 (id, vector) 时，metadata 先用默认值占位。
-    // 这是最常见的简化插入方式。
+    /// 插入一条只包含 id 和向量的记录。
+    ///
+    /// 入口函数1: 只提供 (id, vector) 时，metadata 先用默认值占位。
+    /// 这是最常见的简化插入方式。
     pub fn insert(
         &mut self,
         id: Id,
@@ -34,15 +38,22 @@ impl HnswIndex {
         max_neighbors_to_select: usize,
         max_neighbors_to_keep: usize,
     ) {
-        self.insert_record(VectorRecord {
-            id,
-            vector: vector.clone(),
-            metadata: Metadata::default(),
-        }, ef_construction, max_neighbors_to_select, max_neighbors_to_keep);
+        self.insert_record(
+            VectorRecord {
+                id,
+                vector: vector.clone(),
+                metadata: Metadata::default(),
+            },
+            ef_construction,
+            max_neighbors_to_select,
+            max_neighbors_to_keep,
+        );
     }
 
-    // 入口函数2: 直接插入完整的 VectorRecord。
-    // 这种方式适合上层已经拿到了结构化记录的场景。
+    /// 插入一条完整的向量记录。
+    ///
+    /// 入口函数2: 直接插入完整的 VectorRecord。
+    /// 这种方式适合上层已经拿到了结构化记录的场景。
     pub fn insert_record(
         &mut self,
         record: VectorRecord,
@@ -70,13 +81,17 @@ impl HnswIndex {
         );
     }
 
-    // records 负责保存“原始记录本体”，graph 负责保存“图结构连接”。
-    // 这里单独抽一个方法，方便以后统一调整记录存储策略。
+    /// 保存原始记录本体。
+    ///
+    /// records 负责保存“原始记录本体”，graph 负责保存“图结构连接”。
+    /// 这里单独抽一个方法，方便以后统一调整记录存储策略。
     fn store_record(&mut self, record: VectorRecord) {
         self.records.insert(record.id, record);
     }
 
-    // 入口函数3: 批量插入，本质上只是把单条插入循环执行一遍。
+    /// 批量插入多条向量记录。
+    ///
+    /// 入口函数3: 批量插入，本质上只是把单条插入循环执行一遍。
     pub fn batch_insert(
         &mut self,
         records: Vec<VectorRecord>,
@@ -94,13 +109,13 @@ impl HnswIndex {
         }
     }
 
-    // 真正负责把一个新点接进 HNSW 图。
-    //
-    // 这段流程可以粗略理解成四件事：
-    // 1. 给新点采样层高；
-    // 2. 从图的入口开始找到合适的局部入口点；
-    // 3. 在每一层做局部搜索并挑选邻居；
-    // 4. 双向连边后，对旧邻居做必要的剪枝。
+    /// 将新节点接入 HNSW 图结构。
+    ///
+    /// 这段流程可以粗略理解成四件事：
+    /// 1. 给新点采样层高；
+    /// 2. 从图的入口开始找到合适的局部入口点；
+    /// 3. 在每一层做局部搜索并挑选邻居；
+    /// 4. 双向连边后，对旧邻居做必要的剪枝。
     fn insert_node_into_graph(
         &mut self,
         id: Id,
@@ -127,7 +142,7 @@ impl HnswIndex {
         }
 
         // 3) 先把新节点挂进索引表和节点数组，后续搜索和建边会用到它的 index。
-        // 先插入，再搜索，是因为后面剪枝和连边都要能从 index 直接访问这个节点。
+        // 先挂进索引表和节点数组，再搜索，是因为后面剪枝和连边都要能从 index 直接访问这个节点。
         self.id_to_index.insert(id, new_index);
         self.nodes.push(new_node);
 
@@ -227,11 +242,10 @@ impl HnswIndex {
 
                     // 求解出要删除的连接：也就是那些没有被剪枝保留的旧边。
                     let connections_to_remove: Vec<usize> = {
-
                         let neighbor_node = self
                             .get_node_by_index(neighbor_index)
                             .expect("in insert, get_node_by_index cannot handle neighbor_index");
-                        
+
                         neighbor_node.neighbors[current_lvl]
                             .iter()
                             .copied()
@@ -245,9 +259,9 @@ impl HnswIndex {
                     let neighbor_node = self
                         .get_mut_node_by_index(neighbor_index)
                         .expect("in insert, get_mut_node_by_index cannot handle neighbor_index");
-                    
+
                     neighbor_node.neighbors[current_lvl] = neighbor_pruned_connections;
-                    
+
                     for removed_neighbor_index in connections_to_remove {
                         self.delete_neighbor_relationship_by_index(
                             neighbor_index,
@@ -274,9 +288,11 @@ impl HnswIndex {
         }
     }
 
-    // 仅 legacy 路径仍在使用这套 simple selection；主线建图已经切到 heuristic selection。
-    // 它的策略很直接：把候选按相似度排序，直接取前 M 个。
-    // 这比 heuristic 更简单，但也更容易把彼此过于相近的点都选进来。
+    /// 按相似度直接选择前 M 个邻居。
+    ///
+    /// 仅 legacy 路径仍在使用这套 simple selection；主线建图已经切到 heuristic selection。
+    /// 它的策略很直接：把候选按相似度排序，直接取前 M 个。
+    /// 这比 heuristic 更简单，但也更容易把彼此过于相近的点都选进来。
     pub fn select_neighbors_simple(
         &mut self,
         candidate_set: &HashSet<usize>,
@@ -293,6 +309,10 @@ impl HnswIndex {
         )
     }
 
+    /// 使用给定节点切片执行简单邻居选择。
+    ///
+    /// 先把候选逐个打分，再按分数排序，最后截断为前 M 个。
+    /// 这里的排序是“纯相似度排序”，没有 heuristic 的多样性过滤。
     fn select_neighbors_simple_from_parts(
         nodes: &[HnswNode],
         metric: Metric,
@@ -301,8 +321,6 @@ impl HnswIndex {
         query: &Vector,
         max_neighbors_to_select: usize,
     ) -> Vec<usize> {
-        // 先把候选逐个打分，再按分数排序，最后截断为前 M 个。
-        // 这里的排序是“纯相似度排序”，没有 heuristic 的多样性过滤。
         workspace.reset_similarity_cache(nodes.len());
 
         let mut index_score_map: Vec<(usize, f32)> = candidate_set
@@ -332,10 +350,11 @@ impl HnswIndex {
             .collect()
     }
 
-
-    // 启发式邻居选择：
-    // 输入必须是“已经按相似度排序好的候选”。
-    // 它的目标不是简单取最相似的前 M 个，而是尽量选出“相似度高、但彼此之间不要太像”的一组点。
+    /// 使用启发式规则选择邻居。
+    ///
+    /// 启发式邻居选择：
+    /// 输入必须是“已经按相似度排序好的候选”。
+    /// 它的目标不是简单取最相似的前 M 个，而是尽量选出“相似度高、但彼此之间不要太像”的一组点。
     pub fn select_neighbors_heuristic(
         &mut self,
         scored_candidates: &[(usize, f32)],
@@ -361,8 +380,10 @@ impl HnswIndex {
         self.take_selected_neighbors(max_neighbors_to_select, keep_pruned_connections)
     }
 
-    // 把一层里“无序的候选 index 集合”重新打分，并整理成按分数排序的序列。
-    // 这一步主要服务于旧节点剪枝：剪枝时我们只看当前已有的连接，不额外扩展候选池。
+    /// 给候选节点重新打分并排序。
+    ///
+    /// 把一层里“无序的候选 index 集合”重新打分，并整理成按分数排序的序列。
+    /// 这一步主要服务于旧节点剪枝：剪枝时我们只看当前已有的连接，不额外扩展候选池。
     fn score_and_sort_level_candidates(
         &mut self,
         candidate_indices: &[usize],
@@ -402,8 +423,10 @@ impl HnswIndex {
         scored_candidates
     }
 
-    // `scored_candidates` 已经带有分数，所以这里只负责把它们装入 work_heap，
-    // 不再重新计算 similarity。
+    /// 将已打分候选装入工作堆。
+    ///
+    /// `scored_candidates` 已经带有分数，所以这里只负责把它们装入 work_heap，
+    /// 不再重新计算 similarity。
     fn fill_work_heap_from_scored(&mut self, scored_candidates: &[(usize, f32)], level: usize) {
         for &(candidate_index, candidate_similarity) in scored_candidates {
             // 同样是防御性检查：当前调用路径里这些候选本来就来自该层的现有邻居，
@@ -419,16 +442,18 @@ impl HnswIndex {
         }
     }
 
+    /// 将种子候选的一阶邻居扩展进工作堆。
+    ///
+    /// 对每个种子候选，取出它在当前层的一阶邻居。
+    /// 如果某个邻居还没进入 work_heap，就计算它的相似度并补进去。
+    ///
+    /// 这一步的效果是把“局部图结构”也纳入候选池，而不是只看初始 search_layer 的结果。
     fn extend_work_heap_from_scored(
         &mut self,
         scored_candidates: &[(usize, f32)],
         query: &Vector,
         level: usize,
     ) {
-        // 对每个种子候选，取出它在当前层的一阶邻居。
-        // 如果某个邻居还没进入 work_heap，就计算它的相似度并补进去。
-        //
-        // 这一步的效果是把“局部图结构”也纳入候选池，而不是只看初始 search_layer 的结果。
         for &(candidate_index, _) in scored_candidates {
             if self.nodes[candidate_index].get_neighbors().len() <= level {
                 continue;
@@ -454,20 +479,22 @@ impl HnswIndex {
         }
     }
 
+    /// 从工作堆中取出最终邻居集合。
+    ///
+    /// 这是 heuristic 的核心筛选阶段。
+    ///
+    /// 直观理解：
+    /// - work_heap 里放的是“当前还值得考虑”的候选；
+    /// - result_vec 里放的是“已经选中的邻居”；
+    /// - discard_heap 里放的是“分数高，但和已选结果太像，所以先放弃”的候选。
+    ///
+    /// heuristic 的目标不是简单取最相似的前 M 个，而是尽量让选出来的邻居彼此更分散，
+    /// 这样图的局部连边结构更丰富，后续搜索更不容易陷入一团相似点里。
     fn take_selected_neighbors(
         &mut self,
         max_neighbors_to_select: usize,
         keep_pruned_connections: bool,
     ) -> Vec<usize> {
-        // 这是 heuristic 的核心筛选阶段。
-        //
-        // 直观理解：
-        // - work_heap 里放的是“当前还值得考虑”的候选；
-        // - result_vec 里放的是“已经选中的邻居”；
-        // - discard_heap 里放的是“分数高，但和已选结果太像，所以先放弃”的候选。
-        //
-        // heuristic 的目标不是简单取最相似的前 M 个，而是尽量让选出来的邻居彼此更分散，
-        // 这样图的局部连边结构更丰富，后续搜索更不容易陷入一团相似点里。
         let mut result_vec: Vec<(usize, f32)> = vec![]; // R
         while !self.workspace.work_heap.is_empty() && result_vec.len() < max_neighbors_to_select {
             let nearest_elem_in_work = self.workspace.work_heap.pop().unwrap();
@@ -481,7 +508,7 @@ impl HnswIndex {
             // 直观上就是避免“结果里一堆彼此几乎相同的点”。
             for item in result_vec.iter() {
                 let r_index = item.0;
-                let similarity_e_to_r = distance::similarity(
+                let similarity_e_to_r = distance::metric_similarity(
                     self.nodes[e_index].get_data(),
                     self.nodes[r_index].get_data(),
                     self.metric,

@@ -8,7 +8,7 @@ pub struct SearchLayerStats {
 
 // InsertTimings 结构体记录了 HNSW 插入过程中各个阶段的耗时统计数据。
 #[derive(Debug, Default)]
-pub struct InsertTimings {          
+pub struct InsertTimings {
     pub greedy_search_ns: u128,
     pub search_layer_ns: u128,
     pub select_neighbors_ns: u128,
@@ -19,6 +19,7 @@ pub struct InsertTimings {
 }
 
 impl InsertTimings {
+    /// 累加一次层搜索的耗时和循环次数统计。
     pub fn add_search_layer_stats(&mut self, elapsed_ns: u128, stats: &SearchLayerStats) {
         self.search_layer_ns += elapsed_ns;
         self.search_layer_loop_iterations += stats.loop_iterations;

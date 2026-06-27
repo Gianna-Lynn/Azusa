@@ -10,7 +10,10 @@ fn search_on_empty_index_returns_empty() {
     let mut index = HnswIndex::new(Metric::Cosine, 0.5);
 
     let results = index.search_knn(&vec![1.0, 0.0], 5, 8);
-    assert!(results.is_empty(), "empty index should return empty results");
+    assert!(
+        results.is_empty(),
+        "empty index should return empty results"
+    );
 }
 
 #[test]

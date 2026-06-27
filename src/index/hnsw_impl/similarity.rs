@@ -5,8 +5,10 @@ use crate::types::{Metric, Vector};
 use super::super::{HnswIndex, HnswNode, SearchLayerWorkspace};
 
 impl HnswIndex {
-    // 这个函数的设计初衷是为了在search_layer中替换掉get_similarity_from_parts,
-    // 以利用SearchLayerWorkspace中的sim_marks和sim_values来缓存相似度计算结果, 避免重复计算.
+    /// 从工作区缓存中读取或计算相似度。
+    ///
+    /// 这个函数的设计初衷是为了在search_layer中替换掉get_similarity_from_parts,
+    /// 以利用SearchLayerWorkspace中的sim_marks和sim_values来缓存相似度计算结果, 避免重复计算.
     pub(super) fn get_similarity_from_workspace(
         nodes: &[HnswNode],
         metric: Metric,
@@ -21,8 +23,10 @@ impl HnswIndex {
             // 缓存不命中, 计算相似度并更新缓存
             let target_data = nodes[target_index].get_data();
             let new_similarity = match metric {
-                Metric::L2 => distance::l2_similarity_unchecked(target_data, query),
-                Metric::Cosine => distance::similarity(target_data, query, metric),
+                Metric::L2 => {
+                    distance::l2_similarity_from_squared_distance_unchecked(target_data, query)
+                }
+                Metric::Cosine => distance::metric_similarity(target_data, query, metric),
             };
             workspace.sim_marks[target_index] = workspace.sim_epoch;
             workspace.sim_values[target_index] = new_similarity;

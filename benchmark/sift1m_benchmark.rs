@@ -1,5 +1,5 @@
 //! SIFT1M benchmark harness，用于比较 flat 和 HNSW 的表现。
-use azusa::distance::similarity;
+use azusa::distance::metric_similarity;
 use azusa::index::hnsw::HnswIndex;
 use azusa::types::Metric;
 use std::collections::HashSet;
@@ -231,7 +231,7 @@ fn exact_top_k(base_vecs: &[Vec<f32>], query: &[f32], k: usize, metric: Metric) 
     // 对 base 全量扫一遍，计算每个向量与 query 的相似度，并返回排序后的 top-k。
     let mut results = Vec::with_capacity(base_vecs.len());
     for (idx, base_vec) in base_vecs.iter().enumerate() {
-        let score = similarity(query, base_vec, metric);
+        let score = metric_similarity(query, base_vec, metric);
         results.push((idx as u64, score));
     }
 
@@ -285,7 +285,7 @@ fn run_flat_pass(
     max_k: usize,
 ) -> Vec<BenchmarkRow> {
     let mut accumulators = vec![EvalAccumulator::default(); ks.len()];
-    
+
     // 遍历每个 query 和它对应的 ground truth 前缀，执行暴力搜索，并把结果灌进累积器。
     for (query_vec, reference_ids) in query_vecs.iter().zip(reference_top_k_ids.iter()) {
         // Flat baseline 的核心就是“每个 query 都在整个 base 集上做精确搜索”。
@@ -358,7 +358,7 @@ fn run_hnsw_pass(
                 elapsed,
                 &mut accumulators,
             );
-        }//end for each query
+        } //end for each query
 
         // 每个 ef_search 都会生成一组结果行，最后一起返回。
         rows.extend(build_rows(
@@ -369,10 +369,9 @@ fn run_hnsw_pass(
             ks,
             accumulators,
         ));
-    }//end for each ef_search
+    } //end for each ef_search
 
     rows
-
 }
 
 /// 把单个 query 的搜索结果灌进累积器。
@@ -402,8 +401,8 @@ fn update_accumulators(
 
         // `search_result_ids` 可能比 k 短，所以这里只能按实际长度取前缀。
         let search_len = search_result_ids.len().min(k);
-        let search_prefix = &search_result_ids[..search_len];   // 这个地方不能直接取 k 个，因为搜索结果可能不足 k 个；但 ground truth 前缀是有保证的，直接取 k 个就行。
-        let reference_prefix = &reference_top_k_ids[..k];   // 这个地方可以直接取k个
+        let search_prefix = &search_result_ids[..search_len]; // 这个地方不能直接取 k 个，因为搜索结果可能不足 k 个；但 ground truth 前缀是有保证的，直接取 k 个就行。
+        let reference_prefix = &reference_top_k_ids[..k]; // 这个地方可以直接取k个
 
         // recall@k 的定义：搜索结果 top-k 与 ground truth top-k 的重合比例。
         let overlap_count = search_prefix

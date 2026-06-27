@@ -14,7 +14,7 @@
 #[path = "sift1m_test_utils.rs"]
 mod sift1m_test_utils;
 use crate::sift1m_test_utils::*;
-use azusa::{distance::similarity, index::hnsw::HnswIndex, types::Metric};
+use azusa::{distance::metric_similarity, index::hnsw::HnswIndex, types::Metric};
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 const TEST_METRIC: Metric = Metric::L2;
@@ -267,7 +267,7 @@ pub fn exact_top_k(
 ) -> Vec<(u64, f32)> {
     let mut results = Vec::with_capacity(base_vecs.len());
     for (idx, base_vec) in base_vecs.iter().enumerate() {
-        let score = similarity(query, base_vec, metric);
+        let score = metric_similarity(query, base_vec, metric);
         results.push((idx as u64, score));
     }
 

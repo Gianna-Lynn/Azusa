@@ -12,6 +12,7 @@ pub struct HnswNode {
 }
 
 impl HnswNode {
+    /// 创建一个指定最高层级的 HNSW 节点。
     pub fn new(id: Id, data: Vector, level: usize) -> Self {
         let mut neighbors = Vec::new();
         for _ in 0..=level {
@@ -26,22 +27,27 @@ impl HnswNode {
         }
     }
 
+    /// 返回节点的外部 Id。
     pub fn get_id(&self) -> &Id {
         &self.id
     }
 
+    /// 返回节点存储的向量。
     pub fn get_data(&self) -> &Vector {
         &self.data
     }
 
+    /// 返回节点参与的最高层级。
     pub fn get_node_max_level(&self) -> &usize {
         &self.node_max_level
     }
 
+    /// 返回按层组织的邻接表。
     pub fn get_neighbors(&self) -> &Vec<Vec<usize>> {
         &self.neighbors
     }
 
+    /// 在指定层添加一个邻居 index。
     pub fn add_neighbor(&mut self, neighbor_index: usize, level_to_add: usize) {
         if level_to_add < self.neighbors.len() {
             // 这里假设上游插入/裁剪逻辑已经保证同层邻居唯一；
@@ -57,6 +63,7 @@ impl HnswNode {
         }
     }
 
+    /// 从所有层删除一个单向邻居关系。
     pub fn delete_neighbor_single_direction_at_all_levels(&mut self, neighbor_index: usize) {
         for i in 0..=self.node_max_level {
             // retain 保留满足条件的元素；这里等价于删掉所有等于 neighbor_index 的项。
@@ -64,6 +71,7 @@ impl HnswNode {
         }
     }
 
+    /// 从指定层删除一个单向邻居关系。
     pub fn delete_neighbor_single_direction_at_level(
         &mut self,
         neighbor_index: usize,

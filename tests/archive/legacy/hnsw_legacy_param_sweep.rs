@@ -49,8 +49,8 @@ use azusa::types::Id;
 //             // ],
 //     // note: 访问元组的第一个元素,需要用.1, 第二个元素.2
 //     nodes_data_vec.sort_by(|node1, node2|{
-//         let score1 = similarity(query, &node1.1, TEST_METRIC);
-//         let score2 = similarity(query, &node2.1, TEST_METRIC);
+//         let score1 = metric_similarity(query, &node1.1, TEST_METRIC);
+//         let score2 = metric_similarity(query, &node2.1, TEST_METRIC);
 //         match score2.partial_cmp(&score1).unwrap(){
 //             std::cmp::Ordering::Equal => node1.0.cmp(&node2.0),
 //             other => other,

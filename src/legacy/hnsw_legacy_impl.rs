@@ -2,15 +2,17 @@
 // Legacy-only helpers.
 // 这个文件只服务于旧路径 / 兼容测试，不属于正式 HNSW 实现路径。
 
-use crate::types::{Id, Metadata, Vector, VectorRecord};
 use crate::index::hnsw::{HnswIndex, HnswNode};
+use crate::types::{Id, Metadata, Vector, VectorRecord};
 
 use std::collections::HashSet;
 use std::time::Instant;
 
 impl HnswIndex {
-    // 仅用于旧版参数 sweep / 兼容测试，不属于正式检索路径。
-    // 它允许从外部指定入口点开始搜索，主要是为了复现实验条件。
+    /// 从指定入口点执行 legacy 搜索。
+    ///
+    /// 仅用于旧版参数 sweep / 兼容测试，不属于正式检索路径。
+    /// 它允许从外部指定入口点开始搜索，主要是为了复现实验条件。
     pub fn search_knn_from_entry_for_legacy(
         &mut self,
         entrance_id: Option<Id>,
@@ -41,9 +43,11 @@ impl HnswIndex {
             .collect()
     }
 
-    // 仅用于旧路径 / 兼容测试。
-    // 这个接口允许外部直接指定层高，主要为了复现早期手工构造数据集的条件。
-    // 正式插入路径应当使用 `insert`，由索引内部负责随机采样层高。
+    /// 插入一个指定固定层高的 legacy 节点。
+    ///
+    /// 仅用于旧路径 / 兼容测试。
+    /// 这个接口允许外部直接指定层高，主要为了复现早期手工构造数据集的条件。
+    /// 正式插入路径应当使用 `insert`，由索引内部负责随机采样层高。
     pub fn insert_with_fixed_level_for_legacy(
         &mut self,
         id: Id,

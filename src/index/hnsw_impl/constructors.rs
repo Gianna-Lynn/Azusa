@@ -8,6 +8,7 @@ use crate::types::Metric;
 use super::super::{HnswIndex, SearchLayerWorkspace};
 
 impl HnswIndex {
+    /// 创建一个空的 HNSW 索引。
     pub fn new(metric: Metric, level_sample_probability: f64) -> Self {
         assert!(
             level_sample_probability > 0.0 && level_sample_probability < 1.0,
@@ -27,7 +28,8 @@ impl HnswIndex {
             workspace: SearchLayerWorkspace::new(),
         }
     }
-    
+
+    /// 打印插入阶段的累计耗时统计。
     pub fn print_timings(&self) {
         let total = self.timing.search_layer_ns
             + self.timing.greedy_search_ns

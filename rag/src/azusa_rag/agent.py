@@ -93,12 +93,12 @@ def build_query_plan(query: str) -> QueryPlan:
         retrieval_queries = split_multi_hop_query(rewritten_query)      # 按照连词断开, 切成多条子查询.
         if len(retrieval_queries) <= 1:
             retrieval_queries = [rewritten_query]
-            notes.append("multi_hop_marker_found_but_no_clean_split")
+            notes.append("multi_hop_marker_found_but_no_clean_split")   # note中添加: 找到了多跳标记, 但是没有干净的拆分
         else:
-            notes.append("compound_query_split_for_multi_hop_retrieval")
-    else:
+            notes.append("compound_query_split_for_multi_hop_retrieval") # note中添加: 复合查询被拆分为多跳检索
+    else:                                                               # 如果是单跳
         retrieval_queries = [rewritten_query]
-        notes.append("single_hop_query_used_as_rewrite")
+        notes.append("single_hop_query_used_as_rewrite")                # note中添加: 单跳查询被用作重写
 
     return QueryPlan(
         query_type=query_type,

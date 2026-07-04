@@ -4,6 +4,7 @@ Run Search Agent v0 from the command line.
 
 import argparse
 import json
+import tempfile
 from pathlib import Path
 
 from bootstrap import ensure_src_path
@@ -97,15 +98,29 @@ def write_agent_outputs(
     """
     默认把 agent 结果写到 latest 目录；只有显式要求时才额外保留命名副本。
     """
-    LATEST_SEARCH_RUN_DIR.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(result, ensure_ascii=False, indent=2)
+
     latest_path = LATEST_SEARCH_RUN_DIR / f"search_agent_v0_{mode}.json"
-    latest_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    try:
+        LATEST_SEARCH_RUN_DIR.mkdir(parents=True, exist_ok=True)
+        latest_path.write_text(payload, encoding="utf-8")
+    except PermissionError:
+        fallback_root = Path(tempfile.gettempdir()) / "azusa_search_runs" / "latest"
+        fallback_root.mkdir(parents=True, exist_ok=True)
+        latest_path = fallback_root / f"search_agent_v0_{mode}.json"
+        latest_path.write_text(payload, encoding="utf-8")
 
     run_copy_path = None
     if keep_run_copy and output_name:
-        SEARCH_RUNS_DIR.mkdir(parents=True, exist_ok=True)
-        run_copy_path = SEARCH_RUNS_DIR / f"{output_name}_{mode}.json"
-        run_copy_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        try:
+            SEARCH_RUNS_DIR.mkdir(parents=True, exist_ok=True)
+            run_copy_path = SEARCH_RUNS_DIR / f"{output_name}_{mode}.json"
+            run_copy_path.write_text(payload, encoding="utf-8")
+        except PermissionError:
+            fallback_root = Path(tempfile.gettempdir()) / "azusa_search_runs"
+            fallback_root.mkdir(parents=True, exist_ok=True)
+            run_copy_path = fallback_root / f"{output_name}_{mode}.json"
+            run_copy_path.write_text(payload, encoding="utf-8")
 
     return latest_path, run_copy_path
 

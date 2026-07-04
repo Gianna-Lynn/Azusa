@@ -77,7 +77,7 @@ def search_records_with_sources(
         top_k_list, source_map = search_hybrid_rerank_with_sources(query, embedding_records, top_k)
     elif mode == "bm25":
         top_k_list = search_sparse(query, embedding_records, top_k)
-        source_map = None
+        source_map = [{"id": record_id, "source": "bm25 sparse"} for record_id in top_k_list]
     else:
         raise ValueError("Search mode must be bm25, brute, hnsw, hybrid,or hybrid_rerank")
 

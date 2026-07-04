@@ -53,6 +53,49 @@ python run.py import-hf-eval --length 20
 - `--query-file path\to\query.txt`：从文件读 query。
 - `--keep-run-copy`：额外保留命名副本；默认只覆盖 `latest/`。
 
+## Search Agent v0
+
+Agent v0 是 RAG pipeline 上层的最小编排入口，当前重点不是构造复杂 Agent 框架，而是把一次检索问答过程记录清楚：
+
+```powershell
+python run.py agent --mode bm25 --top-k 5 --with-answer --query-file data\queries\autoevaluate_squad_sample_query_002.txt
+python run.py agent --mode hybrid_rerank --top-k 5 --with-answer --query-file data\queries\autoevaluate_squad_sample_query_001.txt
+```
+
+`bm25` 不需要 Rust 服务；`hybrid_rerank` 需要先启动 `azusa_server`。运行后会生成：
+
+- `output/search_runs/latest/search_agent_v0_bm25.json`
+- `output/search_runs/latest/search_agent_v0_hybrid_rerank.json`
+
+Agent JSON 里最值得先看的字段：
+
+- `query_plan`：query 分类、rewrite 和拆分后的 retrieval queries。
+- `hops`：每一跳实际检索到的 chunk。
+- `fused_evidence`：跨 hop 去重、融合后的证据列表。
+- `fusion.retrieval_sources`：结果来自 dense、sparse、dense + sparse 或 bm25 sparse。
+- `answer_citations`：answerer 最终引用的 chunk id。
+
+更多说明见 `docs/agent_tool_demo.md`。
+
+## Evaluation Philosophy
+
+Azusa 的评测目标不是宣称 RAG / Agent 达到 SOTA，而是让检索行为、答案忠实性和失败模式变得可观察。当前评测更接近工程回归集和面试说明材料，不是公开排行榜式 benchmark。
+
+评测分三层理解：
+
+- 检索层尽量客观化：使用 `Hit@k`、`Recall@k`、`MRR`、latency 观察不同 mode 是否找到了 gold chunks。
+- 答案层半自动化：使用 `citation_id_precision` / `citation_id_recall` 检查引用 id 是否对齐金标，再用人工 review 标注 `answer_correct`、`citation_supported`、`completeness_score`、`faithfulness_score`。
+- 分析层面向改进：用 badcase taxonomy 判断下一步该修 chunk、retrieval、rerank、answer 还是 citation。
+
+因此，workflow 报告里的指标用于回答：
+
+- 不同检索策略行为有什么差异？
+- 哪些 case 能说明 hybrid / rerank 的收益或误伤？
+- answer + citation 的失败模式是什么？
+- 这个系统下一步应该怎么改？
+
+大 LLM 可以辅助语义评价，但不作为唯一考官。最终结论应结合客观检索指标、LLM-assisted review 和人工抽样复核。
+
 ## 输出
 
 - `output/artifacts/`
@@ -65,6 +108,13 @@ python run.py import-hf-eval --length 20
   HF 样本导入默认输出
 - `data/processed/du_retrieval_workflow/latest/`
   DuRetrieval workflow 默认输出
+
+## 可展示资产
+
+- `docs/badcase_v1.md`：Stage 2 badcase taxonomy。
+- `docs/agent_tool_demo.md`：Search Agent v0 demo、输出字段和当前限制。
+- `docs/azusa_f1_cases.md`：可在 README / 面试 / 简历说明中复用的代表性 case。
+- `..\docs\interview_qa.md`：Azusa 项目追问、回答草稿和简历 bullet 草稿。
 
 ## 常见问题
 

@@ -67,6 +67,56 @@ output/search_runs/latest/search_agent_v0_<mode>.json
 
 `answer` / `answer_citations` 是 answerer 的输出。它们用于观察本地小模型是否正确使用 evidence，但不应单独作为检索质量证明。
 
+Answerer 对外固定输出四个字段：
+
+```text
+结论：<直接回答>
+证据：<简短证据摘要>
+引用来源：<本次 evidence 中真实存在的 chunk_id>
+不确定性：<无，或具体限制>
+```
+
+模型未明确给出有效 chunk id 时，系统不会再强制引用 top-1。此时 `answer_citations` 保持为空，并在 `answer_uncertainty` 和 `citation_validation` 中标记需要人工复核。若模型给出了有效 citation 但没有 `答案：`/`结论：` 字段，系统会保留 citation 和证据，同时将状态标记为 `answer_missing`，提示“有引用但没有答案，需要人工审核”。只有答案和 citation 都缺失时，才归为证据不足。
+
+考虑到当前使用的是 0.5B 本地小模型，模型内部只生成“答案 + 显式引用”两行；Python 规范化层再把已引用 chunk 的原文确定性整理成“证据”字段，并补充“不确定性”。这样既降低小模型的格式负担，也不会替模型猜测 citation。
+
+## Stage 3 Agent Eval
+
+P1 使用一份独立的 15 题样例集：
+
+```text
+data/eval/agent_eval.jsonl
+```
+
+它覆盖：
+
+- 3 个 single-hop case
+- 3 个 query rewrite case
+- 3 个显式 multi-hop case
+- 2 个 insufficient-evidence case
+- 4 个 citation badcase
+
+无需加载 Answerer 的检索轨迹 smoke：
+
+```powershell
+cd F:\Repositories\Azusa\rag
+D:\Chuo_Data\conda_envs\ChuoEnv\python.exe run.py agent-eval --mode bm25 --top-k 5
+```
+
+需要同时验证本地小模型回答和 citation 时：
+
+```powershell
+D:\Chuo_Data\conda_envs\ChuoEnv\python.exe run.py agent-eval --mode bm25 --top-k 5 --with-answer
+```
+
+结果默认保存到：
+
+```text
+output/eval_runs/latest/agent_eval_<mode>.json
+```
+
+每个 case 都保留完整 `trace`，包括 query plan、各跳检索结果、融合证据、最终回答、citation 校验状态和耗时。样例集本身提交到 Git，运行输出继续放在可覆盖的 `output/` 目录。
+
 ## Demo Reading Example
 
 `When were stromules discovered?` 的 bm25 demo 中，top-1 evidence 命中 `...chunk_002`，文本包含 `first observed in 1962`，answer 输出 `stromules were discovered in 1962`，并引用同一个 chunk。
@@ -81,7 +131,7 @@ output/search_runs/latest/search_agent_v0_<mode>.json
 
 - Query classification 和 rewrite 仍是规则版，不是模型规划器。
 - Multi-hop split 只覆盖显式连接词和少量中文触发词。
-- Citation answer 依赖本地小模型，可能出现引用正确但答案不完整，或答案正确但 citation 错误。
+- Citation answer 依赖本地小模型，仍可能出现答案不完整或实体选择错误；系统现在只保证引用 ID 来自本次 evidence，不替模型伪造引用。
 - Agent v0 还没有真正 tool calling runtime；当前更接近可观察的 search orchestrator。
 
 ## Interview Summary

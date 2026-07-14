@@ -31,8 +31,8 @@ MODE_METADATA = {
     },
     "hybrid": {
         "family": "dense+sparse",
-        "label": "Hybrid",
-        "notes": "先召回 dense 和 BM25 sparse, 再按当前 merge 策略合并去重.",
+        "label": "Hybrid (RRF)",
+        "notes": "Dense + BM25 sparse 分别召回后, 用 RRF (k=60) 融合排序.",
     },
     "hybrid_rerank": {
         "family": "dense+sparse+rerank",

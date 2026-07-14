@@ -1,6 +1,3 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM
-# AutoTokenizer : 把输入文本转成模型能理解的token序列, 也负责把模型输出的token序列转回文本。
-# AutoModelForCausalLM : 加载一个"因果语言模型"（Causal Language Model），适合生成文本。
 MODEL_PATH = r"D:\Chuo_Data\Models\Qwen2.5-0.5B-Instruct"
 
 _tokenizer = None
@@ -13,6 +10,8 @@ def load_answer_model():
     """
     # 延迟加载就是在函数内部定义一个全局变量，第一次调用函数时才加载模型并赋值给这个变量。
     # 后续调用函数时，如果变量已经有值了，就直接返回，不需要重复加载模型。
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
     global _tokenizer, _model # 声明这两个变量是全局的，这样我们才能在函数内部修改它们的值。
 
     if _tokenizer is None:
@@ -49,28 +48,36 @@ def build_context(result_records) -> str:
     # 有些线路虽然存在跨线关系，但并不都属于常规意义上的直通运转，需要区分具体线路关系。
 
 
-def select_supporting_chunk_ids(answer_text: str, result_records) -> list[str]:
-    """
-    当模型没有稳定给出 citation 时，按答案文本在证据中的命中情况做最小回填。
-    """
-    cleaned_answer = answer_text.strip() # 去掉答案文本前后的空白字符，得到一个干净的答案字符串。
-    if not cleaned_answer or cleaned_answer == "证据不足":
-        return []
+def _extract_field(lines: list[str], labels: tuple[str, ...]) -> str:
+    """从模型输出中提取指定标签对应的单行字段。"""
+    for line in lines:
+        for label in labels:
+            if line.startswith(label):
+                return line.removeprefix(label).strip()
+    return ""
 
-    supporting_ids = []
-    for record in result_records:
-        if cleaned_answer in record.text:
-            supporting_ids.append(record.chunk_id) # 如果答案文本在某个证据块的文本中出现了，就把这个证据块的chunk_id添加到 supporting_ids 列表中。
-
-    if supporting_ids:
-        return supporting_ids
-
-    return [result_records[0].chunk_id] # 如果答案文本在任何证据块中都没有直接命中，就默认引用第一个证据块，确保至少有一个引用。这个策略虽然简单，但可以避免完全没有引用的情况，提供一些线索给用户去查看相关证据。
+def _summarize_cited_evidence(cited_ids: list[str], result_records) -> str:
+    """从模型明确引用的记录中生成简短证据摘要，不替模型新增 citation。result_records 是 EmbeddingRecord 列表，cited_ids 是模型输出中提到的 chunk_id 列表。"""
+    record_by_id = {record.chunk_id: record for record in result_records} # 生成字典. "key : value  for 循环式"
+    summaries = []      # 空列表 summaries 用来存储每个引用的证据块的简短摘要。
+    for chunk_id in cited_ids:      # 遍历cited_ids 列表中的每个 chunk_id.
+        record = record_by_id[chunk_id]     # 根据 chunk_id去record_by_id 字典中找到对应的 EmbeddingRecord 对象。
+        clean_text = " ".join(record.text.split())    # 取出 record.text 的文本内容，去掉多余的空白字符，并把它们用单个空格连接起来，形成一个干净的文本字符串。
+        if len(clean_text) > 180:                     # 如果太长, 保留前180个字符, 补上省略号.
+            clean_text = clean_text[:180] + "..."
+        summaries.append(f"[{chunk_id}] {clean_text}")  # 把每个引用的证据块的 chunk_id 和对应的简短文本摘要拼接成一个字符串，并添加到 summaries 列表中。
+    return "；".join(summaries)         # 最后把所有的简短证据摘要用中文分号连接成一个完整的证据摘要字符串，并返回.
 
 
 def normalize_answer_output(output_text: str, result_records) -> dict:
     """
-    把小模型的自由输出整理成稳定的 answer + citation 结构。
+    解析模型生成的两行“答案 + 引用”，再由 Python 补齐证据摘要和不确定性，输出统一的四段式回答:"结论,证据, 引用来源, 不确定性"。
+    小模型的自由输出形如:
+    答案：<direct answer>
+    引用：<chunk_id1, chunk_id2>
+    如果证据不足，就输出：
+    答案：证据不足
+    引用：无
     """
     output_text = output_text.strip()
     valid_chunk_ids = [record.chunk_id for record in result_records]
@@ -81,34 +88,82 @@ def normalize_answer_output(output_text: str, result_records) -> dict:
         if line:
             lines.append(line) # 去掉每行前后的空白字符，如果这一行不空，就把它添加到 lines 列表中。
 
-    answer_value = ""
-    for line in lines:
-        if line.startswith("答案："):
-            answer_value = line.removeprefix("答案：").strip() # 如果这一行以 "答案：" 开头，就把 "答案：" 这个前缀去掉，剩下的部分就是答案文本，再去掉前后的空白字符，得到最终的答案值。
-            break
-
-    if not answer_value:
-        answer_value = lines[0] if lines else "证据不足" # 如果没有找到以 "答案：" 开头的行，就默认把第一行作为答案值，如果没有任何行，就把答案值设为 "证据不足"。
+    answer_value = _extract_field(lines, ("结论：", "答案："))
+    has_answer_field = bool(answer_value)
+    evidence_value = _extract_field(lines, ("证据：",))
+    uncertainty_value = _extract_field(lines, ("不确定性：",))
 
     cited_ids = []
     for chunk_id in valid_chunk_ids:
         if chunk_id in output_text:
             cited_ids.append(chunk_id)
 
-    if answer_value == "证据不足": # 如果答案是证据不足，就不应该有任何引用，直接清空 cited_ids。
+    # 先根据模型是否给出答案、是否给出有效引用，确定答案状态。
+    if not has_answer_field and cited_ids:
+        # 模型：有有效引用，但缺少“答案/结论”字段。
+        # 处理：保留引用，标记为答案缺失，交给人工审核。
+        answer_value = "答案缺失"
+        answer_status = "answer_missing"
+    elif not has_answer_field:
+        # 模型：既没有答案字段，也没有有效引用。
+        # 处理：归为证据不足。
+        answer_value = "证据不足"
+        answer_status = "missing_or_insufficient"
+    elif answer_value == "证据不足":
+        # 模型：明确回答“证据不足”（即使同时输出了引用）。
+        # 处理：撤销所有引用，统一标记为证据不足。
         cited_ids = []
-    elif not cited_ids: # 如果模型没有明确给出引用的chunk_id，就根据答案文本在证据中的命中情况做最小回填，确保至少有一个相关的引用。
-        cited_ids = select_supporting_chunk_ids(answer_value, result_records) 
+        answer_status = "missing_or_insufficient"
+    elif not cited_ids:
+        # 模型：给出了答案，但没有可验证的引用。
+        answer_status = "citation_missing"
+    else:
+        # 模型：同时给出了答案和至少一个有效引用。
+        answer_status = "valid"
+
+    if not evidence_value and cited_ids:
+        # 模型：未提供证据摘要，但有有效引用。
+        # 处理：根据引用的原文确定性生成证据摘要。
+        evidence_value = _summarize_cited_evidence(cited_ids, result_records)
+    elif not evidence_value:
+        # 模型：未提供证据摘要，也没有有效引用。
+        evidence_value = "未提供独立的证据摘要"
+
+    if answer_value == "证据不足":
+        # 模型状态：证据不足。
+        evidence_value = "现有检索证据不足以支持可靠结论"
+        uncertainty_value = uncertainty_value or "证据不足，无法可靠回答"
+    elif answer_value == "答案缺失":
+        # 模型状态：有引用但没有答案。
+        uncertainty_value = uncertainty_value or "有引用但没有答案，需要人工审核"
+    elif not cited_ids:
+        # 模型状态：有答案但没有可验证引用。
+        uncertainty_value = uncertainty_value or "模型未提供可验证的引用，结论需人工复核"
+    else:
+        # 模型状态：答案和引用均有效。
+        uncertainty_value = uncertainty_value or "无"
 
     citation_text = "无"
-    if cited_ids:       # 如果有引用的chunk_id，就把它们用逗号连接成一个字符串，作为引用文本。
+    if cited_ids:
+        # 将已验证的 chunk_id 拼接为最终引用文本。
         citation_text = ", ".join(cited_ids)
 
-    formatted_text = f"答案：{answer_value}\n引用：{citation_text}"
+    formatted_text = (
+        f"结论：{answer_value}\n"
+        f"证据：{evidence_value}\n"
+        f"引用来源：{citation_text}\n"
+        f"不确定性：{uncertainty_value}"
+    )
     # 最终返回一个字典，包含整理后的答案文本、引用的chunk_id列表、格式化后的文本，以及模型的原始输出文本。
     return {
         "answer_text": answer_value,
+        "evidence_text": evidence_value,
         "citation_ids": cited_ids,
+        "uncertainty": uncertainty_value,
+        "citation_validation": {
+            "status": answer_status,
+            "valid_chunk_ids": valid_chunk_ids,
+        },
         "formatted_text": formatted_text,
         "raw_output": output_text,
     }
@@ -118,6 +173,25 @@ def answer_with_citations(query: str, result_records) -> dict:
     """
     基于 query + 检索结果，生成最小 answer + citations 输出。
     """
+    if not result_records:
+        return {
+            "answer_text": (
+                "结论：证据不足\n"
+                "证据：没有检索到可用证据\n"
+                "引用来源：无\n"
+                "不确定性：证据不足，无法可靠回答"
+            ),
+            "answer_raw": "",
+            "evidence_text": "没有检索到可用证据",
+            "citation_ids": [],
+            "uncertainty": "证据不足，无法可靠回答",
+            "citation_validation": {
+                "status": "missing_or_insufficient",
+                "valid_chunk_ids": [],
+            },
+            "context": "",
+        }
+
     tokenizer, model = load_answer_model() # 加载小模型和对应的tokenizer，准备进行文本生成任务。
     context = build_context(result_records) # 把检索结果拼成给模型的证据块，形成一个包含多个chunk_id和对应文本的上下文字符串，供模型参考生成答案。
 
@@ -127,8 +201,11 @@ def answer_with_citations(query: str, result_records) -> dict:
             "content": (
                 "You must answer only from the provided evidence. "
                 "Do not use outside knowledge. "
+                "Inspect each evidence block independently. "
+                "If at least one block directly states the answer, the evidence is sufficient; "
+                "ignore unrelated blocks and cite only the supporting block. "
                 "Output exactly two lines and nothing else.\n"
-                "Line 1: 答案：<answer>\n"
+                "Line 1: 答案：<direct answer>\n"
                 "Line 2: 引用：<chunk_id1, chunk_id2>\n"
                 "If evidence is insufficient, output:\n"
                 "答案：证据不足\n"
@@ -140,7 +217,8 @@ def answer_with_citations(query: str, result_records) -> dict:
             "content": (
                 f"Evidence:\n{context}\n\n"
                 f"Question:\n{query}\n\n"
-                "Only use chunk_id values that already appear in the evidence."
+                "Only use chunk_id values that already appear in the evidence. "
+                "Copy each cited chunk_id exactly, without inventing or shortening it."
             )
         },
     ]
@@ -170,6 +248,9 @@ def answer_with_citations(query: str, result_records) -> dict:
     return {
         "answer_text": normalized_output["formatted_text"],
         "answer_raw": normalized_output["raw_output"],
+        "evidence_text": normalized_output["evidence_text"],
         "citation_ids": normalized_output["citation_ids"],
+        "uncertainty": normalized_output["uncertainty"],
+        "citation_validation": normalized_output["citation_validation"],
         "context": context,
     }

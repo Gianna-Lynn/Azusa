@@ -2,8 +2,13 @@
 hybrid / hybrid_rerank 的编排逻辑。
 
 这里不再关心 HTTP 细节或 BM25 细节，只做：
-1. dense 和 sparse 的结果怎么合并
+1. 用 RRF 把 dense 和 sparse 的排序列表融合成一个
 2. hybrid_rerank 怎么扩大候选池、再做 rerank
+
+RRF (Reciprocal Rank Fusion) 是 hybrid fusion 的核心机制。
+选择 RRF 而不是分数归一化或加权组合的原因：
+- dense (cosine) 和 sparse (BM25) 的分数分布完全不同，无法直接比较；
+- RRF 只看 rank，天然跨检索器可比，且不需要调参（除了平滑常数 k）。
 """
 
 from __future__ import annotations
@@ -14,28 +19,42 @@ from .search_hnsw import ensure_hnsw_index_loaded, search_core_hnsw
 from .search_sparse import rerank_candidates, search_sparse
 
 
-def hybrid_merge(dense_ids: list[int], sparse_ids: list[int], top_k: int) -> list[int]:
+def rrf_fusion(
+    *ranked_lists: list[int],
+    top_k: int,
+    k: int = 60,
+) -> list[int]:
     """
-    最小 hybrid merge。
-    先保留 dense 的顺序，再补进 sparse 里还没出现过的候选。
+    Reciprocal Rank Fusion: 倒数排名融合. 把多条已排序的 id 列表融合成一个排序列表。
+
+    假设 M 代表所有的排行榜, m 代表第 m 个排行榜,
+    rank_m(d) 代表文档 d 在排行榜 m 中的排名(从1开始)
+    文档 d 的 RRF 分数定义为：
+    Score(d) = ∑_{m∈M} 1/(k + rank_m(d))
+
+    k 默认 60，来自 TREC 等 IR 实验的常用设定。
+    k 越大，高 rank 和低 rank 的贡献差距越小（曲线更平）；第 1 名是 1/61 = 0.0164，第 10 名是 1/70 =  0.0142。
+    k 越小，高 rank 的权重越突出。 第 1 名的得分是 1/(1+1) = 0.5，第 10 名是 1/(1+10) = 0.09
+
+    如果同一个 id 出现在多路结果中，它会累加各路的贡献，
+    因此被多路检索器同时认为相关的文档会自然排到前面。
+
+    rrf_fusion 的输入是多条已排序的 id 列表，例如  [1, 2], [2, 3] 或者 [1, 2, 3], [2, 3, 4], [5, 6]。
+    在一个列表中, 列表的(下标+1)代表 rank, 列表的值代表文档 id。
+    输出是融合后的 id 列表。
     """
-    merged_ids = []
-    seen_ids = set()
+    if not ranked_lists:
+        return []
 
-    for dense_id in dense_ids:
-        if dense_id in seen_ids:
-            continue
-        merged_ids.append(dense_id)
-        seen_ids.add(dense_id)
+    scores: dict[int, float] = {}
 
-    # dense 结果先保留原顺序，sparse 只负责补充 dense 没召回到的候选。
-    for sparse_id in sparse_ids:
-        if sparse_id in seen_ids:
-            continue
-        merged_ids.append(sparse_id)
-        seen_ids.add(sparse_id)
+    for ranked_list in ranked_lists:
+        for rank, doc_id in enumerate(ranked_list, start=1):
+            scores[doc_id] = scores.get(doc_id, 0.0) + 1.0 / (k + rank)
 
-    return merged_ids[:top_k]
+    # 按 RRF 分数降序，同分时按 id 升序保证确定性
+    sorted_ids = sorted(scores.keys(), key=lambda id_: (-scores[id_], id_))
+    return sorted_ids[:top_k]
 
 
 def build_source_map(
@@ -75,8 +94,8 @@ def search_hybrid_with_sources(
     ensure_hnsw_index_loaded(embedding_records)
     dense_ids = search_core_hnsw(query_vec, top_k)  # 用 dense 检索拿一批结果
     sparse_ids = search_sparse(query, embedding_records, top_k)  # 用 sparse 检索再拿一批结果
-    merged_ids = hybrid_merge(dense_ids, sparse_ids, top_k)  # 把 dense 和 sparse 结果合并去重
-    source_map = build_source_map(merged_ids, dense_ids, sparse_ids)  # 给每个结果补来源标签
+    merged_ids = rrf_fusion(dense_ids, sparse_ids, top_k=top_k)
+    source_map = build_source_map(merged_ids, dense_ids, sparse_ids)
     return merged_ids, source_map
 
 
@@ -97,8 +116,8 @@ def search_hybrid_rerank_with_sources(
     ensure_hnsw_index_loaded(embedding_records)
     dense_ids = search_core_hnsw(query_vec, candidate_k)
     sparse_ids = search_sparse(query, embedding_records, candidate_k)
-    merged_ids = hybrid_merge(dense_ids, sparse_ids, candidate_k)
-    # 先拿到一个“更宽”的候选集，再交给 reranker 做排序纠偏。
+    merged_ids = rrf_fusion(dense_ids, sparse_ids, top_k=candidate_k)
+    # 先拿到一个”更宽”的候选集，再交给 reranker 做排序纠偏。
     reranked_ids = rerank_candidates(
         query=query,
         candidate_ids=merged_ids,

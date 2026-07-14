@@ -71,7 +71,8 @@ impl HnswIndex {
         // - candidate_heap / result_heap 直接清空；
         // - similarity cache 也沿用 epoch 复用。
         let mut stats = SearchLayerStats::default();
-        self.workspace.reset_search_layer_workspace(self.nodes.len());
+        self.workspace
+            .reset_search_layer_workspace(self.nodes.len());
         self.workspace.reset_similarity_cache(self.nodes.len());
         let nodes = &self.nodes;
         let metric = self.metric;
@@ -82,14 +83,14 @@ impl HnswIndex {
 
         let entry_similarity =
             Self::get_similarity_from_workspace(nodes, metric, workspace, entry_index, query);
-        
-        // 用入口点的相似度初始化候选堆, candidate_heap是一个大根堆, 堆顶是当前最优的候选. 
+
+        // 用入口点的相似度初始化候选堆, candidate_heap是一个大根堆, 堆顶是当前最优的候选.
         // 这里把index包成Reverse<usize>是为了在相似度相同的情况下优先扩展index小的点, 以实现稳定输出.
         workspace.candidate_heap.push((
             ordered_float::NotNan::new(entry_similarity).unwrap(),
             std::cmp::Reverse(entry_index),
         ));
-        
+
         // 用入口点的相似度初始化结果堆, result_heap是一个小根堆, 堆顶是当前最差的结果.
         workspace.result_heap.push((
             std::cmp::Reverse(ordered_float::NotNan::new(entry_similarity).unwrap()),
@@ -124,7 +125,6 @@ impl HnswIndex {
             let current_candidate_neighbors =
                 Self::get_neighbors_at_lvl_from_parts(nodes, current_candidate_index, level);
             for &neighbor_index in current_candidate_neighbors {
-                
                 // 如果这个邻居已经被访问过了, 就跳过.
                 if workspace.visited_marks[neighbor_index] == workspace.visited_epoch {
                     continue;
@@ -142,12 +142,11 @@ impl HnswIndex {
                     query,
                 );
 
-                // 如果这个邻居的相似度足够好, 大于等于当前结果堆里最差的相似度, 
+                // 如果这个邻居的相似度足够好, 大于等于当前结果堆里最差的相似度,
                 // 或者结果堆还没有填满 ef 个结果, 就把它加入候选堆和结果堆.
                 if neighbor_similarity >= worst_result_similarity
                     || workspace.result_heap.len() < ef
                 {
-
                     // 加入候选堆. candidate_heap是一个大根堆, 堆顶是当前最优的候选.
                     workspace.candidate_heap.push((
                         ordered_float::NotNan::new(neighbor_similarity).unwrap(),
@@ -223,7 +222,7 @@ impl HnswIndex {
         let mut max_similarity_index = current_node_index;
 
         loop {
-            // 只看第level层的邻居, 不进入更低层了. 
+            // 只看第level层的邻居, 不进入更低层了.
             let current_node_neighbors = &nodes[current_node_index].get_neighbors()[level];
 
             for &neighbor_index in current_node_neighbors {

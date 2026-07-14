@@ -33,6 +33,7 @@ COMMAND_SPECS = [
     CommandSpec("embed", "run_embed", "Build embeddings from chunks into output/artifacts/embedding.jsonl."),
     CommandSpec("search", "run_search", "Run one retrieval query and write output/search_runs/latest/."),
     CommandSpec("agent", "run_agent", "Run Search Agent v0 and write output/search_runs/latest/."),
+    CommandSpec("agent-eval", "run_agent_eval", "Run the Stage 3 Agent sample set and save structured traces."),
     CommandSpec("eval", "run_eval", "Run retrieval eval and write output/eval_runs/latest/."),
     CommandSpec("workflow", "run_workflow", "Run the consolidated workflow and write output/eval_runs/latest/."),
     CommandSpec("import-hf-eval", "run_import_hf_eval", "Import a Hugging Face QA sample snapshot."),
@@ -58,6 +59,7 @@ def patched_argv(command_name: str, argv: list[str]) -> Iterator[None]:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """构造统一入口及其全部子命令的参数解析器。"""
     parser = argparse.ArgumentParser(
         description="Unified Azusa RAG command runner.",
     )
@@ -70,6 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def dispatch_command(command_name: str, forwarded_argv: list[str]) -> None:
+    """加载目标子命令模块，并把剩余参数原样转交给它。"""
     spec = COMMAND_BY_NAME[command_name]
     module = importlib.import_module(spec.module_name)
     command_main = getattr(module, "main")
@@ -79,6 +82,7 @@ def dispatch_command(command_name: str, forwarded_argv: list[str]) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """解析统一入口参数，并执行用户选择的子命令。"""
     parser = build_parser()
     args, forwarded_argv = parser.parse_known_args(argv)
 

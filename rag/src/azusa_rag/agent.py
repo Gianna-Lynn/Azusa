@@ -1,10 +1,4 @@
-"""
-Search Agent v0 orchestration.
-
-This module keeps the first Agent milestone deliberately small:
-classify the query, rewrite it into one or more retrieval queries, run
-retrieval for each hop, then fuse evidence into a stable result object.
-"""
+"""Search Agent v0 编排：查询规划、多跳检索、证据融合与引用回答。"""
 
 from __future__ import annotations
 
@@ -12,7 +6,6 @@ import re
 from dataclasses import asdict, dataclass
 
 from .schemas import EmbeddingRecord
-from .search import search_records_with_sources
 
 
 MULTI_HOP_MARKERS = [
@@ -43,12 +36,13 @@ class QueryPlan:
     notes: list[str]              # 备注
 
     def to_dict(self) -> dict:
+        """把查询计划转换成可直接写入 JSON 的普通字典。"""
         return asdict(self)
 
 
 def normalize_query_text(query: str) -> str:
     """
-    Collapse whitespace and trim common trailing punctuation. 清理噪音: 空白和标点
+    压缩连续空白并移除常见尾部标点，得到稳定的检索查询文本。
     """
     normalized = re.sub(r"\s+", " ", query).strip()
     return normalized.rstrip(" ?？。")
@@ -56,7 +50,7 @@ def normalize_query_text(query: str) -> str:
 
 def classify_query(query: str) -> str:
     """
-    Minimal deterministic query classifier for Agent v0. 判断是不是多跳.依靠关键词列表的规则触发, 而不是依靠模型.
+    使用确定性关键词规则判断查询属于单跳还是多跳。
     """
     lowered = query.lower()
     if any(marker in lowered for marker in MULTI_HOP_MARKERS):
@@ -66,7 +60,7 @@ def classify_query(query: str) -> str:
 
 def split_multi_hop_query(query: str) -> list[str]:
     """
-    Split obvious compound questions into retrieval-sized subqueries. 如果是多跳, 按照"和/与/and/.."这些连接词切成多条子查询.
+    按显式中英文连接词把复合问题切成适合检索的子查询。
     """
     parts = re.split(
         r"\s*(?:\band\b|\bor\b|\bboth\b|以及|并且|同时|和|与|、|；|;)\s*",
@@ -83,7 +77,7 @@ def split_multi_hop_query(query: str) -> list[str]:
 
 def build_query_plan(query: str) -> QueryPlan:
     """
-    Build the classification + rewrite plan used by the Agent.
+    构造 Agent 使用的查询分类、规范化文本和多跳检索计划。
     """
     rewritten_query = normalize_query_text(query)   # 先清理噪音: 空白和标点
     query_type = classify_query(rewritten_query)    # 判断是不是多跳
@@ -110,6 +104,7 @@ def build_query_plan(query: str) -> QueryPlan:
 
 
 def make_preview(text: str, limit: int = 160) -> str:
+    """把证据正文压缩成指定长度的单行预览文本。"""
     clean_text = text.replace("\n", " ").strip()
     if len(clean_text) <= limit:
         return clean_text
@@ -121,8 +116,7 @@ def fuse_evidence(
     top_k: int,
 ) -> list[dict]:
     """
-    Fuse per-hop retrieval results by repeated hits first, then best rank.
-    多跳检索每一跳都会返回一批chunk, 同一个chunk可能在多跳里都出现过, 需要合并去重, 并重新排序.
+    合并各 hop 的检索结果，优先重复命中次数，再比较最佳排名。
     """
     fused_by_chunk_id: dict[str, dict] = {}
 
@@ -193,7 +187,7 @@ def evidence_to_records(
     embedding_records: list[EmbeddingRecord],
 ) -> list[EmbeddingRecord]:
     """
-    Map fused evidence dictionaries back to records for answer generation.
+    把融合后的 evidence 字典映射回记录对象，供 Answerer 构造上下文。
     """
     record_by_chunk_id = {record.chunk_id: record for record in embedding_records}
     return [record_by_chunk_id[item["chunk_id"]] for item in evidence]
@@ -207,8 +201,10 @@ def run_search_agent(
     with_answer: bool = False,
 ) -> dict:
     """
-    Execute Search Agent v0 and return a structured trace.
+    执行 Search Agent v0，并返回查询计划、各跳结果、融合证据和可选回答轨迹。
     """
+    from .search import search_records_with_sources
+
     plan = build_query_plan(query)  # 得到Query Plan, 含有多条子查询.
     hop_results = []
 
@@ -267,6 +263,9 @@ def run_search_agent(
         result["answer"] = answer_dict["answer_text"]
         result["answer_raw"] = answer_dict["answer_raw"]
         result["answer_citations"] = answer_dict["citation_ids"]
+        result["answer_evidence"] = answer_dict["evidence_text"]
+        result["answer_uncertainty"] = answer_dict["uncertainty"]
+        result["citation_validation"] = answer_dict["citation_validation"]
         result["answer_context"] = answer_dict["context"]
 
     return result

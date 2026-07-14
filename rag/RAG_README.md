@@ -42,6 +42,7 @@ python run.py search --mode brute --top-k 3
 python run.py search --mode hnsw --top-k 3
 python run.py search --mode hybrid_rerank --top-k 3 --with-answer
 python run.py agent --mode hybrid_rerank --top-k 5 --with-answer
+python run.py agent-eval --mode bm25 --top-k 5
 python run.py eval --mode all --top-k 3
 python run.py workflow
 python run.py import-hf-eval --length 20
@@ -76,6 +77,8 @@ Agent JSON 里最值得先看的字段：
 - `answer_citations`：answerer 最终引用的 chunk id。
 
 更多说明见 `docs/agent_tool_demo.md`。
+
+Stage 3 的 15 题 Agent 样例集位于 `data/eval/agent_eval.jsonl`，覆盖 single-hop、query rewrite、multi-hop、证据不足和 citation badcase。运行 `agent-eval` 后会把每题的 query plan、retrieval hops、fused evidence 和可选回答保存为结构化 trace。
 
 ## Evaluation Philosophy
 

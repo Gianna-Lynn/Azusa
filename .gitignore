@@ -1,6 +1,11 @@
 /target
 *.zip
 data/
+!rag/data/
+rag/data/*
+!rag/data/eval/
+rag/data/eval/*
+!rag/data/eval/agent_eval.jsonl
 .claude/
 .codex/
 .vscode/

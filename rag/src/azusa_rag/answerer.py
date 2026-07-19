@@ -169,7 +169,7 @@ def normalize_answer_output(output_text: str, result_records) -> dict:
     }
 
 
-def answer_with_citations(query: str, result_records) -> dict:
+def answer_with_citations(query: str, result_records, tool_context: str="") -> dict:
     """
     基于 query + 检索结果，生成最小 answer + citations 输出。
     """
@@ -194,6 +194,13 @@ def answer_with_citations(query: str, result_records) -> dict:
 
     tokenizer, model = load_answer_model() # 加载小模型和对应的tokenizer，准备进行文本生成任务。
     context = build_context(result_records) # 把检索结果拼成给模型的证据块，形成一个包含多个chunk_id和对应文本的上下文字符串，供模型参考生成答案。
+
+    if tool_context:    # 如果工具那边看到了工具上下文, 那么就拼接到模型能看见的字符串最后.
+        context += (
+            "\n\n"
+            "[Tool context]\n"
+            f"{tool_context}"
+        )
 
     messages = [    # 构建一个对话消息列表，包含系统提示和用户输入两部分
         {

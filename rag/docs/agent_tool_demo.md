@@ -117,6 +117,16 @@ output/eval_runs/latest/agent_eval_<mode>.json
 
 每个 case 都保留完整 `trace`，包括 query plan、各跳检索结果、融合证据、最终回答、citation 校验状态和耗时。样例集本身提交到 Git，运行输出继续放在可覆盖的 `output/` 目录。
 
+## Stage 3 P3 实现状态
+
+P3 的最小 Tool Calling runtime 已完成，并已接入 Search Agent 主流程。当前实现包含工具分发、参数校验、结构化错误、一次重试、计时、工具上下文和可序列化的工具 trace。原始作业说明仍保留在：
+
+```text
+docs/stage3_p3_assignment.md
+```
+
+实现代码位于 `src/azusa_rag/tool_calling.py`，验收测试位于 `tests/test_tool_calling_assignment.py`；测试当前实际执行，不再默认跳过。
+
 ## Demo Reading Example
 
 `When were stromules discovered?` 的 bm25 demo 中，top-1 evidence 命中 `...chunk_002`，文本包含 `first observed in 1962`，answer 输出 `stromules were discovered in 1962`，并引用同一个 chunk。

@@ -146,6 +146,24 @@ def fuse_evidence(
             # 取出当前排名对应记录的source; record.source来自EmbeddingRecord, 表示这条chunk原始来自哪里.
             # 使用add()放入集合 retrieval_sources, 自动去重.
 
+    # fused_by_chunk_id 最终形如:
+    # {
+    #   "chunk_001": {
+    #       "record": <EmbeddingRecord>,
+    #       "best_rank": 1,
+    #       "hit_count": 2,
+    #       "hop_indices": [1, 2],
+    #       "retrieval_sources": {"source_a", "source_b"},
+    #   },
+    #   "chunk_002": {
+    #       "record": <EmbeddingRecord>,
+    #       "best_rank": 3,
+    #       "hit_count": 1,
+    #       "hop_indices": [2],
+    #       "retrieval_sources": {"source_c"},
+    #   },
+    #   ...
+    # }
     fused_items = list(fused_by_chunk_id.values())
     fused_items.sort(                   # 排序逻辑:
         key=lambda item: (
@@ -193,6 +211,75 @@ def evidence_to_records(
     return [record_by_chunk_id[item["chunk_id"]] for item in evidence]
 
 
+def run_tool_stage(
+    evidence: list[dict],
+    embedding_records: list[EmbeddingRecord],
+    inject_failure_once: bool = False,  # 故障注入: 当此布尔值为True, 那么第一次执行工具时故意失败, 第二次执行同一个工具时恢复成功.
+) -> dict:
+    """执行工具阶段，并返回工具 trace 与可供 Answerer 使用的上下文。"""
+
+    # evidence 形如:
+    # [
+    #   {
+    #       "rank": 1,
+    #       "doc_id": "doc_001",
+    #       "chunk_id": "chunk_001",
+    #       "source": "source_a",
+    #       "chunk_index": 0,
+    #       "page": 1,
+    #       "preview": "This is a preview of chunk 001...",
+    #       "full_text": "This is the full text of chunk 001.",
+    #       "fusion": {
+    #           "hit_count": 2,
+    #           "best_rank": 1,
+    #           "hop_indices": [1, 2],
+    #           "retrieval_sources": ["source_a", "source_b"],
+    #       },
+    #   },
+    #   ...
+    # ]
+
+
+    from .tool_calling import (
+        ToolCall,
+        build_tool_context,
+        execute_with_retry,
+        get_chunk_by_id,
+    )
+
+    my_dict = dict()
+    my_dict["trace"] = None
+    my_dict["context"] = None
+    if len(evidence) == 0:
+        # 返回结构化失败? 暂时不会. 先返回空字典.
+        return my_dict
+
+    tool_call = ToolCall("debug-1", "get_chunk_by_id", {"chunk_id": evidence[0]["chunk_id"]})
+
+    # 当前仅支持默认 executor 和一次性故障注入 executor；其他 executor 作为后续扩展。
+
+    calls = {"count" : 0}
+    def flaky_executor(**_: object) -> dict:
+        if calls["count"] == 0:
+            calls["count"] += 1
+            raise TimeoutError("Error injected")
+        # 故障注入只改变第一次执行的行为；第二次成功时复用默认工具，
+        # 保证返回结果与 executor=None 的正常路径完全一致。
+        return get_chunk_by_id(
+            evidence[0]["chunk_id"],
+            embedding_records=embedding_records,
+        )
+
+    if inject_failure_once:
+        tool_execution_trace = execute_with_retry(tool_call= tool_call, embedding_records= embedding_records, max_attempts = 2, executor= flaky_executor)
+    else:
+        tool_execution_trace = execute_with_retry(tool_call= tool_call, embedding_records= embedding_records, max_attempts = 2, executor= None)
+    tool_context =  build_tool_context(tool_trace=tool_execution_trace)
+
+    my_dict["trace"] = tool_execution_trace
+    my_dict["context"] = tool_context
+    return my_dict
+
 def run_search_agent(
     query: str,
     embedding_records: list[EmbeddingRecord],
@@ -225,6 +312,15 @@ def run_search_agent(
         )
 
     evidence = fuse_evidence(hop_results, top_k=top_k)  # 将多跳检索结果融合成最终的evidence列表, 并排序.
+    tool_stage_result = None
+    if evidence:        # 如果有evidence, 尝试调用工具.
+        tool_stage_result = run_tool_stage(
+            evidence= evidence,
+            embedding_records= embedding_records,
+            inject_failure_once=False
+        )
+
+
     answer_dict = None
     if with_answer and evidence:    # 如果需要生成答案, 且有evidence, 则调用answer_with_citations生成答案.
         from .answerer import answer_with_citations
@@ -232,6 +328,7 @@ def run_search_agent(
         answer_dict = answer_with_citations(
             query=plan.rewritten_query,
             result_records=evidence_to_records(evidence, embedding_records),
+            tool_context = tool_stage_result["context"],    # str类型
         )
 
     result = {
@@ -239,6 +336,16 @@ def run_search_agent(
         "query_plan": plan.to_dict(),
         "mode": mode,
         "top_k": top_k,
+        "tool_trace": (
+            tool_stage_result["trace"].to_dict()
+            if tool_stage_result is not None
+            else None
+        ),
+        "tool_context": (
+            tool_stage_result["context"]
+            if tool_stage_result is not None
+            else None
+        ),
         "hops": [
             {
                 "hop_index": hop["hop_index"],

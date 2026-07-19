@@ -47,6 +47,7 @@ cargo run --release --bin sift1m_benchmark -- --mode hnsw --base-limit 1000 --qu
 - `sift1m_benchmark` 支持 recall@k / exact@k 复测，并输出 Markdown / CSV。
 - Hybrid Search 使用 RRF 融合 dense 与 BM25 排名，避免原始分数不可比和 dense-first 截断问题。
 - Search Agent v0 支持规则分类、query rewrite、显式 multi-hop retrieval 和 evidence fusion。
+- Stage 3 P3 的最小 Function Calling runtime 已实现并接入 Search Agent，设计与验收记录见 `rag/docs/stage3_p3_assignment.md`。
 - Answerer 固定输出结论、证据、引用来源和不确定性；citation 只接受当前 evidence 中真实存在的 chunk id。
 - 15 题 Agent Eval 覆盖 single-hop、query rewrite、multi-hop、证据不足和历史 citation badcase。
 - `rag/run.py` 统一调度 chunk、embed、search、eval、workflow、agent 和 agent-eval。

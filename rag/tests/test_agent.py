@@ -1,8 +1,10 @@
 """验证 Search Agent v0 的规划与证据融合纯逻辑。"""
 
+import json
 import unittest
+from unittest.mock import patch
 
-from azusa_rag.agent import build_query_plan, fuse_evidence
+from azusa_rag.agent import build_query_plan, fuse_evidence, run_search_agent, run_tool_stage
 from azusa_rag.schemas import EmbeddingRecord
 
 
@@ -73,6 +75,94 @@ class EvidenceFusionTests(unittest.TestCase):
         self.assertEqual(evidence[0]["fusion"]["hit_count"], 2)  # 检查 common chunk 的命中次数是否为 2.
         self.assertEqual(evidence[0]["fusion"]["hop_indices"], [1, 2])  # 检查 common chunk 的 hop_indices 是否包含两个 hop.
 
+class RunToolTests(unittest.TestCase):
+    """测试工具调用的正常运行, 测试故障注入"""
+    def test_run_tool_stage(self) -> None:
+        embedding_records = [make_record("chunk_001")]
+
+        evidence = [
+            {
+                "rank": 1,
+                "doc_id": "doc_001",
+                "chunk_id": "chunk_001",
+                "source": "source_a",
+                "chunk_index": 0,
+                "page": 1,
+                "preview": "This is a preview of chunk 001...",
+                "full_text": "This is the full text of chunk 001.",
+                "fusion": {
+                    "hit_count": 2,
+                    "best_rank": 1,
+                    "hop_indices": [1, 2],
+                    "retrieval_sources": ["source_a", "source_b"],
+                },
+            },
+        ]
+
+        run_tool_stage_dict = run_tool_stage(evidence=evidence, embedding_records=embedding_records, inject_failure_once=False)
+
+
+        # 检查：
+        # trace 不为空
+        # attempts 长度为 1
+        # 最后一次 status 为 success
+        # context 包含 chunk_id
+        # context 包含 正文
+        self.assertIsNotNone(run_tool_stage_dict["trace"])
+        self.assertEqual(run_tool_stage_dict["trace"].call.tool_name, "get_chunk_by_id")
+        self.assertEqual(len(run_tool_stage_dict["trace"].attempts), 1)
+        self.assertEqual(run_tool_stage_dict["trace"].attempts[0].status, "success")
+        self.assertEqual(run_tool_stage_dict["trace"].used_in_answer, True)
+        self.assertIn(evidence[0]["chunk_id"], run_tool_stage_dict["context"])
+        self.assertIn("text for chunk_001", run_tool_stage_dict["context"]) # 前者是由这个测试文件构建的embedding record的正文部分. 后者是工具执行完毕以后会给出的上下文.
+
+
+
+    def test_inject_failure_once(self) -> None:
+        embedding_records = [make_record("chunk_001")]
+        evidence = [{"chunk_id": "chunk_001",}]
+        run_tool_stage_dict = run_tool_stage(evidence=evidence, embedding_records=embedding_records, inject_failure_once=True)
+        trace = run_tool_stage_dict["trace"]
+
+        self.assertEqual(len(run_tool_stage_dict["trace"].attempts), 2)
+        self.assertEqual(run_tool_stage_dict["trace"].attempts[0].status, "failed")
+        self.assertEqual(run_tool_stage_dict["trace"].attempts[1].status, "success")
+        self.assertIn("chunk_001", run_tool_stage_dict["context"])
+
+
+class SearchAgentIntegrationTests(unittest.TestCase):
+    """验证 Search Agent 主流程确实接入工具阶段。"""
+
+    def test_search_agent_persists_tool_trace_and_passes_tool_context(self) -> None:
+        record = make_record("chunk_001")
+        answer_dict = {
+            "answer_text": "结论：测试答案",
+            "answer_raw": "答案：测试答案\n引用：chunk_001",
+            "evidence_text": "[chunk_001] text for chunk_001",
+            "citation_ids": ["chunk_001"],
+            "uncertainty": "无",
+            "citation_validation": {"status": "valid", "valid_chunk_ids": ["chunk_001"]},
+            "context": "[chunk_id=chunk_001]\ntext for chunk_001\n\n[Tool context]\nchunk_001 text for chunk_001",
+        }
+
+        with patch("azusa_rag.search.search_records_with_sources") as search_mock:
+            search_mock.return_value = ([record], [{"source": "test"}])
+            with patch("azusa_rag.answerer.answer_with_citations", return_value=answer_dict) as answer_mock:
+                result = run_search_agent(
+                    query="What is in chunk_001?",
+                    embedding_records=[record],
+                    mode="bm25",
+                    top_k=1,
+                    with_answer=True,
+                )
+
+        self.assertEqual(search_mock.call_count, 1)
+        answer_mock.assert_called_once()
+        self.assertIn("chunk_001", answer_mock.call_args.kwargs["tool_context"])
+        self.assertEqual(result["tool_trace"]["call"]["tool_name"], "get_chunk_by_id")
+        self.assertEqual(result["tool_trace"]["attempts"][0]["status"], "success")
+        self.assertIn("chunk_001", result["tool_context"])
+        json.dumps(result, ensure_ascii=False)
 
 if __name__ == "__main__":
     unittest.main()

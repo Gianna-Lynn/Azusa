@@ -49,3 +49,14 @@ HTTP 503。
 
 启动网关后，在 Kaiji 正确答案分支运行 live integration test。解释为什么 `bm25` 可离线
 验收，而其他 mode 继承模型、GPU 或 Rust HNSW 服务要求。
+
+正常流水线的 `output/artifacts/embedding.jsonl` 是生成物，不纳入 Git。为了让新 clone
+也能复现课程，仓库跟踪了最小证据集：
+
+```powershell
+python run_kaiji_gateway.py --port 38117 --embedding-path tests/fixtures/kaiji_gateway_embedding.jsonl
+```
+
+它只用于验证 `stromules → 命中含 1962 的证据 → 按 chunk_id 取回同一正文` 这条 HTTP
+契约，不代表真实语料质量或完整检索评测。若要使用本地完整语料，可省略
+`--embedding-path`，让脚本读取正常流水线产物。

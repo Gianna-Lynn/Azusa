@@ -1,0 +1,3 @@
+{"doc_id":"biology","chunk_id":"stromules-1962","chunk_index":0,"source":"plant_cell_notes.txt","embedding":[0.0,0.0],"page":1,"text":"Stromules are stroma-filled tubules extending from plastids; the structures were first described in 1962."}
+{"doc_id":"agent","chunk_id":"kaiji-runtime","chunk_index":0,"source":"kaiji_notes.txt","embedding":[0.0,0.0],"page":null,"text":"Kaiji owns the single-Agent runtime, tool execution, workflow, trace, and evaluation."}
+{"doc_id":"retrieval","chunk_id":"azusa-retrieval","chunk_index":0,"source":"azusa_notes.txt","embedding":[0.0,0.0],"page":null,"text":"Azusa provides retrieval evidence through a stable semantic gateway."}

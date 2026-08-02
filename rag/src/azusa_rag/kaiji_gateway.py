@@ -1,8 +1,4 @@
-"""Stable semantic HTTP gateway from Kaiji to Azusa.
-
-The gateway owns transport validation and maps Azusa EmbeddingRecord values to
-small JSON evidence objects. It deliberately does not import any Kaiji code.
-"""
+"""为 Kaiji 提供稳定语义 HTTP 契约，并映射 Azusa 的检索记录与结构化错误。"""
 
 from __future__ import annotations
 
@@ -33,15 +29,14 @@ def _default_search_function(
     top_k: int,
     mode: str,
 ) -> tuple[list[EmbeddingRecord], list[dict] | None]:
-    # Delay model-related imports until a real default-backend request arrives.
-    # Contract tests and injected teaching backends therefore stay lightweight.
+    # 只有真实默认后端收到请求时才导入模型相关模块，让契约测试保持轻量。
     from .search import search_records_with_sources
 
     return search_records_with_sources(query, embedding_records, top_k, mode)
 
 
 class GatewayError(Exception):
-    """A client-safe failure with an HTTP and retry policy."""
+    """表示可安全返回给客户端、并携带 HTTP 与重试策略的失败。"""
 
     def __init__(
         self,
@@ -57,6 +52,8 @@ class GatewayError(Exception):
         self.retryable = retryable
 
     def to_dict(self) -> dict[str, Any]:
+        """把错误转换为稳定的 JSON 响应外壳。"""
+
         return {
             "error": {
                 "code": self.code,
@@ -67,6 +64,8 @@ class GatewayError(Exception):
 
 
 def validate_search_request(query: Any, k: Any, mode: Any) -> tuple[str, int, str]:
+    """校验并规范化语义检索参数；所有调用方错误均不可重试。"""
+
     if not isinstance(query, str) or not query.strip():
         raise GatewayError(
             "invalid_query",
@@ -92,6 +91,8 @@ def validate_search_request(query: Any, k: Any, mode: Any) -> tuple[str, int, st
 
 
 class KaijiGatewayService:
+    """把 Azusa 检索函数与记录表包装为 Kaiji 所需的两个语义操作。"""
+
     def __init__(
         self,
         embedding_records: list[EmbeddingRecord],
@@ -105,6 +106,8 @@ class KaijiGatewayService:
         self._search_function = search_function
 
     def search_azusa(self, query: Any, k: Any, mode: Any) -> dict[str, Any]:
+        """执行检索并映射完整证据字段；后端异常统一为可重试 503。"""
+
         query, k, mode = validate_search_request(query, k, mode)
         try:
             records, source_map = self._search_function(
@@ -145,6 +148,8 @@ class KaijiGatewayService:
         return {"hits": hits, "mode": mode}
 
     def get_chunk_by_id(self, chunk_id: Any) -> dict[str, Any]:
+        """按稳定 chunk_id 返回完整证据；非法或未知标识不可重试。"""
+
         if not isinstance(chunk_id, str) or not chunk_id.strip():
             raise GatewayError(
                 "invalid_chunk_id",
@@ -174,22 +179,26 @@ class KaijiGatewayService:
 
 @lru_cache(maxsize=1)
 def get_default_service() -> KaijiGatewayService:
+    """惰性加载正常流水线产物，并在进程内复用默认服务。"""
+
     return KaijiGatewayService(load_embedding_records(EMBEDDING_OUTPUT_PATH))
 
 
 def search_azusa(query: str, k: int, mode: str) -> dict[str, Any]:
-    """Stable in-process entrypoint requested by Kaiji's task book."""
+    """提供任务书要求的进程内稳定检索入口。"""
 
     return get_default_service().search_azusa(query, k, mode)
 
 
 def get_chunk_by_id(chunk_id: str) -> dict[str, Any]:
-    """Stable in-process evidence lookup requested by Kaiji's task book."""
+    """提供任务书要求的进程内稳定证据读取入口。"""
 
     return get_default_service().get_chunk_by_id(chunk_id)
 
 
 class KaijiGatewayHTTPServer(ThreadingHTTPServer):
+    """把语义服务附着到支持并发请求的教学 HTTP Server。"""
+
     daemon_threads = True
 
     def __init__(
@@ -202,6 +211,8 @@ class KaijiGatewayHTTPServer(ThreadingHTTPServer):
 
 
 class KaijiGatewayRequestHandler(BaseHTTPRequestHandler):
+    """实现健康检查、语义搜索、证据读取与结构化错误响应。"""
+
     server: KaijiGatewayHTTPServer
 
     def do_POST(self) -> None:
@@ -324,6 +335,8 @@ def build_http_server(
     *,
     service: KaijiGatewayService | None = None,
 ) -> KaijiGatewayHTTPServer:
+    """构造监听指定地址的 HTTP Server，并允许测试注入轻量服务。"""
+
     return KaijiGatewayHTTPServer(
         (host, port),
         service or get_default_service(),

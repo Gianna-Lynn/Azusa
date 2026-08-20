@@ -1,7 +1,7 @@
 # Kaiji Semantic Gateway 练习
 
-正确答案：`solution/kaiji-semantic-gateway`  
-练习分支：`todo/kaiji-semantic-gateway`
+正确答案：`solution/azusa-v2`
+练习分支：`main`
 
 环境：
 
@@ -26,7 +26,7 @@ $py = 'D:\Chuo_Data\conda_envs\ChuoEnv\python.exe'
 HTTP 503。
 
 ```powershell
-& $py -m pytest tests/test_kaiji_gateway.py -k "maps or backend"
+& $py -m pytest tests/test_kaiji_gateway.py -k "maps or backend or tracked_fixture"
 ```
 
 ## TODO 3：证据读取
@@ -34,7 +34,7 @@ HTTP 503。
 完成 `get_chunk_by_id`。有效 ID 返回正文与元数据；未知 ID 返回不可重试 HTTP 404。
 
 ```powershell
-& $py -m pytest tests/test_kaiji_gateway.py -k chunk
+& $py -m pytest tests/test_kaiji_gateway.py -k "get_chunk or invalid_chunk_id"
 ```
 
 ## TODO 4：HTTP 路由
@@ -42,7 +42,7 @@ HTTP 503。
 完成 JSON body 读取、`POST /search_azusa`、`GET /chunks/{chunk_id}`、状态码和结构化错误。
 
 ```powershell
-& $py -m pytest tests/test_kaiji_gateway.py
+& $py -m pytest tests/test_kaiji_gateway.py -k real_http
 ```
 
 ## TODO 5：Kaiji 真实对接

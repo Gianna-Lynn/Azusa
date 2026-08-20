@@ -18,7 +18,7 @@ def record(chunk_id: str, text: str, **metadata) -> EmbeddingRecord:
     )
 
 
-def test_metadata_filter_and_acl_are_separate_predicates() -> None:
+def test_metadata_matches_requires_all_scalars_and_one_tag() -> None:
     finance = record(
         "finance",
         "budget policy",
@@ -30,12 +30,15 @@ def test_metadata_filter_and_acl_are_separate_predicates() -> None:
     requested = MetadataFilter(department="finance", tags_any=frozenset({"policy"}))
 
     assert metadata_matches(finance, requested)
+    assert not metadata_matches(finance, MetadataFilter(department="engineering"))
+    assert not metadata_matches(finance, MetadataFilter(tags_any=frozenset({"security"})))
+
+
+def test_acl_allows_is_tenant_isolated_and_fail_closed() -> None:
+    finance = record("finance", "budget", tenant_id="acme", department="finance", visibility="department")
     assert not acl_allows(finance, AccessContext("acme", frozenset({"engineering"})))
     assert acl_allows(finance, AccessContext("acme", frozenset({"finance"})))
     assert not acl_allows(finance, AccessContext("other", frozenset({"finance"})))
-
-
-def test_unknown_visibility_is_denied() -> None:
     secret = record("secret", "secret", visibility="mystery")
     assert not acl_allows(secret, AccessContext(None))
 
@@ -58,10 +61,27 @@ def test_filtered_bm25_overfetches_then_preserves_source_alignment() -> None:
     assert sources == [{"id": 1, "source": "bm25 sparse"}]
 
 
-def test_filter_parsers_reject_unknown_fields() -> None:
+def test_metadata_filter_parser_rejects_unknown_and_bad_tags() -> None:
     try:
         MetadataFilter.from_dict({"owner": "alice"})
     except ValueError as error:
         assert "Unknown" in str(error)
     else:
         raise AssertionError("unknown filter fields must fail closed")
+
+    for bad_tags in ("policy", ["policy", 3]):
+        try:
+            MetadataFilter.from_dict({"tags_any": bad_tags})
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("tags_any must be a string list")
+
+
+def test_access_context_parser_rejects_truthy_non_bool() -> None:
+    try:
+        AccessContext.from_dict({"tenant_id": "acme", "departments": [], "allow_private": 1})
+    except ValueError as error:
+        assert "boolean" in str(error)
+    else:
+        raise AssertionError("truthy integers must not grant private access")

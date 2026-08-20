@@ -2,6 +2,14 @@
 
 Azusa is a retrieval and knowledge-base research system with a Rust HNSW index and a Python RAG pipeline.
 
+## Branches
+
+- `main`: 课程主线，保留完整协议、数据模型、测试和 L1/L2/L3 TODO。
+- `solution/azusa-v2`: 与课程契约对应的完整可运行参考实现。
+
+课程任务与验收映射见 [Azusa v2 课程任务书](rag/docs/azusa_v2_assignment.md) 和
+[课程要求追踪](rag/docs/azusa_v2_traceability.md)。
+
 ## What is implemented
 
 - Rust HNSW insert/search/record HTTP service and SIFT1M recall/latency experiments.

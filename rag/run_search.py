@@ -18,6 +18,7 @@ from azusa_rag.config import EMBEDDING_OUTPUT_PATH, LATEST_SEARCH_RUN_DIR, SEARC
 from azusa_rag.loaders import load_embedding_records
 from azusa_rag.modes import SEARCH_MODES
 from azusa_rag.schemas import EmbeddingRecord
+from azusa_rag.filters import AccessContext, MetadataFilter
 from azusa_rag.search import (
     get_query,
     search_records_with_sources,
@@ -50,6 +51,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to the embedding jsonl used for retrieval. Defaults to output/artifacts/embedding.jsonl.",
     )
     parser.add_argument("--with-answer", action="store_true", help="Whether to run the answerer on top of search results.")
+    parser.add_argument("--metadata-filter", help="JSON object with tenant/department/type/language/visibility/tags_any filters.")
+    parser.add_argument("--access-context", help="JSON object with tenant_id, departments and allow_private ACL fields.")
     query_group = parser.add_mutually_exclusive_group()
     query_group.add_argument("--query-text", help="Use an explicit query string instead of the default query file.")
     query_group.add_argument(
@@ -99,6 +102,7 @@ def build_result_dict(
     result_records: list[EmbeddingRecord],
     source_dict_list: list[dict] | None = None,
     answer_dict: dict | None = None,
+    retrieval_trace: dict | None = None,
 ) -> dict:
     """
     把搜索结果整理成结构化字典, 方便后续写入 JSON 或做模式对比.
@@ -134,6 +138,8 @@ def build_result_dict(
         result_dict["answer_raw"] = answer_dict["answer_raw"]
         result_dict["answer_citations"] = answer_dict["citation_ids"]
         result_dict["answer_context"] = answer_dict["context"]
+    if retrieval_trace is not None:
+        result_dict["retrieval_trace"] = retrieval_trace
 
     return result_dict
 
@@ -191,15 +197,21 @@ def run_search_result(
     mode: str,
     top_k: int,
     with_answer: bool = False,
+    metadata_filter: MetadataFilter | None = None,
+    access_context: AccessContext | None = None,
 ) -> dict:
     """
     对单条 query 执行一次完整搜索，并返回统一结果字典。
     """
+    retrieval_trace = {}
     result_records, source_map = search_records_with_sources(
         query=query,
         embedding_records=embedding_records,
         top_k=top_k,
         mode=mode,
+        metadata_filter=metadata_filter,
+        access_context=access_context,
+        trace=retrieval_trace,
     )
 
     if with_answer:
@@ -217,6 +229,7 @@ def run_search_result(
         result_records=result_records,
         source_dict_list=source_map,
         answer_dict=answer_dict,
+        retrieval_trace=retrieval_trace,
     )
 
 
@@ -233,6 +246,8 @@ def main() -> None:
         mode=args.mode,
         top_k=args.top_k,
         with_answer=args.with_answer,
+        metadata_filter=MetadataFilter.from_dict(json.loads(args.metadata_filter)) if args.metadata_filter else None,
+        access_context=AccessContext.from_dict(json.loads(args.access_context)) if args.access_context else None,
     )
 
     print_results(result_dict)

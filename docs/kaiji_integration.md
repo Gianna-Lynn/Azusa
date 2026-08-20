@@ -5,9 +5,8 @@ Kaiji 是 Azusa 上层的单 Agent Runtime。Azusa 继续负责检索与证据�
 
 ## 分支
 
-- `main`：只保留本说明，不提前加入实验性网关代码。
-- `solution/kaiji-semantic-gateway`：可运行的正确答案。
-- `todo/kaiji-semantic-gateway`：同一契约、测试和启动框架，但核心逻辑留作 TODO。
+- `main`：同一契约、测试和启动框架，Gateway 核心逻辑留作 TODO。
+- `solution/azusa-v2`：包含 Gateway 与 Azusa v2 的完整可运行答案。
 
 ## 稳定接口
 
@@ -32,7 +31,7 @@ HTTP 错误，不把 traceback 暴露给 Kaiji。
 ## 正确答案分支运行方式
 
 ```powershell
-git switch solution/kaiji-semantic-gateway
+git switch solution/azusa-v2
 Set-Location rag
 $py = 'D:\Chuo_Data\conda_envs\ChuoEnv\python.exe'
 
@@ -48,11 +47,11 @@ $py = 'D:\Chuo_Data\conda_envs\ChuoEnv\python.exe'
 
 ```powershell
 Set-Location F:\Repositories\Kaiji
-git switch solution/kaiji-v0-full-course
+git switch solution/kaiji-v0
 & $py -m pytest tests/test_azusa_live_integration.py
 ```
 
-## TODO 分支学习目标
+## `main` 学习目标
 
 按 `rag/docs/kaiji_gateway_assignment.md` 的顺序完成：
 

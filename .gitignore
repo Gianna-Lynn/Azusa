@@ -9,3 +9,9 @@ rag/data/eval/*
 .claude/
 .codex/
 .vscode/
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example

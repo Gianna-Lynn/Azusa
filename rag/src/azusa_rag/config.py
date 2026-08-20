@@ -40,6 +40,7 @@ HF_IMPORT_RUNS_DIR = HF_IMPORT_ROOT_DIR / "runs"
 CHUNK_OUTPUT_PATH = ARTIFACTS_DIR / "chunks.jsonl"
 
 EMBEDDING_OUTPUT_PATH = ARTIFACTS_DIR / "embedding.jsonl"
+KNOWLEDGE_BASE_MANIFEST_PATH = ARTIFACTS_DIR / "knowledge_base_manifest.json"
 
 EMBEDDING_MODEL_NAME = r"D:\Chuo_Data\Models\Qwen3-Embedding-0.6B" # 这个是专门用来编码的模型, 接下来的配置要和embedder.py里调用的地方保持一致.
 EMBEDDING_DIM = 512       # 模型的向量维度.

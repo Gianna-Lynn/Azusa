@@ -197,8 +197,8 @@ def build_report_markdown(summary: dict) -> str:
 
     lines.append("## Eval Metrics")
     lines.append("")
-    lines.append("| mode | hit@k | recall@k | mrr | status |")
-    lines.append("| --- | --- | --- | --- | --- |")
+    lines.append("| mode | hit@k | recall@k | mrr | nDCG@k | p50 ms | p95 ms | status |")
+    lines.append("| --- | --- | --- | --- | --- | --- | --- | --- |")
     for mode_item in summary["eval_modes"]:
         if mode_item["status"] == "completed":
             metrics = mode_item["metrics"]
@@ -211,10 +211,13 @@ def build_report_markdown(summary: dict) -> str:
                 + f"{metrics['avg_recall_at_k']:.4f}"
                 + " | "
                 + f"{metrics['avg_mrr']:.4f}"
+                + " | " + f"{metrics['avg_ndcg_at_k']:.4f}"
+                + " | " + f"{metrics['p50_retrieval_latency_ms']:.3f}"
+                + " | " + f"{metrics['p95_retrieval_latency_ms']:.3f}"
                 + " | completed |"
             )
         else:
-            lines.append("| " + mode_item["mode"] + " | - | - | - | failed |")
+            lines.append("| " + mode_item["mode"] + " | - | - | - | - | - | - | failed |")
     lines.append("")
 
     lines.append("## Metric Ranking")
@@ -445,6 +448,9 @@ def main() -> None:
                         "avg_hit_at_k": summary["avg_hit_at_k"],
                         "avg_recall_at_k": summary["avg_recall_at_k"],
                         "avg_mrr": summary["avg_mrr"],
+                        "avg_ndcg_at_k": summary["avg_ndcg_at_k"],
+                        "p50_retrieval_latency_ms": summary["p50_retrieval_latency_ms"],
+                        "p95_retrieval_latency_ms": summary["p95_retrieval_latency_ms"],
                     },
                 }
             )

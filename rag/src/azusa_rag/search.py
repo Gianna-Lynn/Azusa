@@ -13,9 +13,12 @@
 
 from __future__ import annotations
 
+from time import perf_counter
+
 from .config import EMBEDDING_OUTPUT_PATH
 from .loaders import load_embedding_records
 from .schemas import EmbeddingRecord
+from .filters import AccessContext, MetadataFilter, record_is_visible
 from .search_common import (
     build_search_vecs,
     dot_product,
@@ -52,36 +55,87 @@ def search_records_with_sources(
     embedding_records: list[EmbeddingRecord],
     top_k: int,
     mode: str = "brute",
+    metadata_filter: MetadataFilter | None = None,
+    access_context: AccessContext | None = None,
+    filter_overfetch: int = 5,
+    trace: dict | None = None,
 ) -> tuple[list[EmbeddingRecord], list[dict] | None]:
     """
     完整的搜索流程。
     按 mode 选择 brute / hnsw / hybrid / hybrid_rerank / bm25，
     最终返回 EmbeddingRecord 列表，以及可选的来源标记。
     """
+    total_started = perf_counter()
+    if trace is not None:
+        trace.update({"mode": mode, "requested_top_k": top_k, "corpus_count": len(embedding_records)})
+    filtered_request = metadata_filter is not None or access_context is not None
+    requested_top_k = top_k
+    if filtered_request:
+        if filter_overfetch < 1:
+            raise ValueError("filter_overfetch must be at least 1")
+        top_k = min(len(embedding_records), max(top_k, top_k * filter_overfetch))
+
     if mode == "brute":
         # brute 模式才需要 query vector 和全部候选向量。
+        started = perf_counter()
         query_vec = embed_query(query=query)  # query -> query vector
+        if trace is not None:
+            trace["embedding_ms"] = (perf_counter() - started) * 1000
         search_vecs = build_search_vecs(embedding_records=embedding_records)  # embedding_records -> search vectors
+        started = perf_counter()
         top_k_list = search_core_brute(query_vec=query_vec, search_vecs=search_vecs, top_k=top_k)
+        if trace is not None:
+            trace["dense_ms"] = (perf_counter() - started) * 1000
+            trace["dense_candidate_count"] = len(top_k_list)
         source_map = None
     elif mode == "hnsw":
         # hnsw 需要先确保 azusa_server 里已经装好当前这批 embedding。
+        started = perf_counter()
         query_vec = embed_query(query=query)
+        if trace is not None:
+            trace["embedding_ms"] = (perf_counter() - started) * 1000
+        started = perf_counter()
         ensure_hnsw_index_loaded(embedding_records)
         top_k_list = search_core_hnsw(query_vec=query_vec, top_k=top_k)
+        if trace is not None:
+            trace["dense_ms"] = (perf_counter() - started) * 1000
+            trace["dense_candidate_count"] = len(top_k_list)
         source_map = None
     elif mode == "hybrid":
-        top_k_list, source_map = search_hybrid_with_sources(query, embedding_records, top_k)
+        top_k_list, source_map = search_hybrid_with_sources(query, embedding_records, top_k, trace=trace)
     elif mode == "hybrid_rerank":
         # hybrid_rerank 在 hybrid 召回的基础上再走一次 rerank 重排。
-        top_k_list, source_map = search_hybrid_rerank_with_sources(query, embedding_records, top_k)
+        top_k_list, source_map = search_hybrid_rerank_with_sources(query, embedding_records, top_k, trace=trace)
     elif mode == "bm25":
+        started = perf_counter()
         top_k_list = search_sparse(query, embedding_records, top_k)
+        if trace is not None:
+            trace["sparse_ms"] = (perf_counter() - started) * 1000
+            trace["sparse_candidate_count"] = len(top_k_list)
         source_map = [{"id": record_id, "source": "bm25 sparse"} for record_id in top_k_list]
     else:
         raise ValueError("Search mode must be bm25, brute, hnsw, hybrid,or hybrid_rerank")
 
     result_records = ids_to_records(top_k_list, embedding_records)
+    if filtered_request:
+        if trace is not None:
+            trace["pre_filter_count"] = len(result_records)
+        kept_records = []
+        kept_sources = [] if source_map is not None else None
+        for index, record in enumerate(result_records):
+            if record_is_visible(record, metadata_filter, access_context):
+                kept_records.append(record)
+                if kept_sources is not None:
+                    kept_sources.append(source_map[index])
+            if len(kept_records) == requested_top_k:
+                break
+        result_records = kept_records
+        source_map = kept_sources
+    result_records = result_records[:requested_top_k]
+    if trace is not None:
+        trace["post_filter_count"] = len(result_records)
+        trace["filter_strategy"] = "overfetch-then-filter" if filtered_request else "none"
+        trace["total_ms"] = (perf_counter() - total_started) * 1000
     return result_records, source_map
 
 

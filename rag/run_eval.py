@@ -127,6 +127,22 @@ def reciprocal_rank(retrieved_chunk_ids: list[str], relevant_chunk_ids: set[str]
     return 0.0
 
 
+def normalized_discounted_cumulative_gain(
+    retrieved_chunk_ids: list[str],
+    relevant_chunk_ids: set[str],
+) -> float:
+    """Compute binary-relevance nDCG for the retrieved ranking."""
+
+    dcg = sum(
+        1.0 / math.log2(rank + 1)
+        for rank, chunk_id in enumerate(retrieved_chunk_ids, start=1)
+        if chunk_id in relevant_chunk_ids
+    )
+    ideal_hits = min(len(retrieved_chunk_ids), len(relevant_chunk_ids))
+    idcg = sum(1.0 / math.log2(rank + 1) for rank in range(1, ideal_hits + 1))
+    return dcg / idcg if idcg else 0.0
+
+
 def evaluate_case(
     query_case: dict,
     retrieved_chunk_ids: list[str],
@@ -146,6 +162,7 @@ def evaluate_case(
     hit_at_k = 1.0 if matched_chunk_ids else 0.0
     recall_at_k = len(matched_chunk_ids) / len(relevant_chunk_ids)
     mrr = reciprocal_rank(retrieved_top_k, relevant_chunk_ids) # mrr是mean reciprocal rank,平均倒数排名.但是"平均"这个动作目前不在这里, 这里现在算的是"单条query的分数", 在后面的summarize_case_results中会求平均.
+    ndcg = normalized_discounted_cumulative_gain(retrieved_top_k, relevant_chunk_ids)
 
     return {
         "query_id": query_case["query_id"],
@@ -160,6 +177,7 @@ def evaluate_case(
         "hit_at_k": hit_at_k,
         "recall_at_k": recall_at_k,
         "mrr": mrr,
+        "ndcg_at_k": ndcg,
         "retrieval_latency_ms": retrieval_latency_ms,
         "notes": query_case.get("notes"), # 有些样本可能没有备注"notes", 因此这里选用了get, 保证如果没有"notes"也不会报错.
     }
@@ -182,12 +200,14 @@ def summarize_case_results(case_results: list[dict], mode: str, top_k: int) -> d
     total_hit_at_k = 0.0
     total_recall_at_k = 0.0
     total_mrr = 0.0
+    total_ndcg = 0.0
     latencies_ms = []
 
     for case_result in case_results:
         total_hit_at_k += case_result["hit_at_k"]
         total_recall_at_k += case_result["recall_at_k"]
         total_mrr += case_result["mrr"]
+        total_ndcg += case_result["ndcg_at_k"]
         latencies_ms.append(case_result["retrieval_latency_ms"])
 
     return {
@@ -197,6 +217,7 @@ def summarize_case_results(case_results: list[dict], mode: str, top_k: int) -> d
         "avg_hit_at_k": total_hit_at_k / query_count,
         "avg_recall_at_k": total_recall_at_k / query_count,
         "avg_mrr": total_mrr / query_count,
+        "avg_ndcg_at_k": total_ndcg / query_count,
         "total_retrieval_latency_ms": sum(latencies_ms),
         "avg_retrieval_latency_ms": sum(latencies_ms) / query_count,
         "p50_retrieval_latency_ms": percentile(latencies_ms, 0.50),
@@ -257,6 +278,7 @@ def print_eval_summary(summary: dict) -> None:
     print(f"avg_hit@k: {summary['avg_hit_at_k']:.4f}")
     print(f"avg_recall@k: {summary['avg_recall_at_k']:.4f}")
     print(f"avg_mrr: {summary['avg_mrr']:.4f}")
+    print(f"avg_ndcg@k: {summary['avg_ndcg_at_k']:.4f}")
     print(f"avg_retrieval_latency_ms: {summary['avg_retrieval_latency_ms']:.3f}")
     print(f"p95_retrieval_latency_ms: {summary['p95_retrieval_latency_ms']:.3f}")
     print()

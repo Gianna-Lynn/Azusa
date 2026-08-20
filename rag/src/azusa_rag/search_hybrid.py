@@ -13,6 +13,8 @@ RRF (Reciprocal Rank Fusion) 是 hybrid fusion 的核心机制。
 
 from __future__ import annotations
 
+from time import perf_counter
+
 from .schemas import EmbeddingRecord
 from .search_common import embed_query
 from .search_hnsw import ensure_hnsw_index_loaded, search_core_hnsw
@@ -85,16 +87,32 @@ def search_hybrid_with_sources(
     query: str,
     embedding_records: list[EmbeddingRecord],
     top_k: int,
+    trace: dict | None = None,
 ) -> tuple[list[int], list[dict]]:
     """
     hybrid 专用 helper。
     先分别跑 dense 检索和 sparse 检索，再合并结果，最后返回 id 列表和来源标记。
     """
+    started = perf_counter()
     query_vec = embed_query(query)  # 把 query 做成向量
+    if trace is not None:
+        trace["embedding_ms"] = (perf_counter() - started) * 1000
+    started = perf_counter()
     ensure_hnsw_index_loaded(embedding_records)
     dense_ids = search_core_hnsw(query_vec, top_k)  # 用 dense 检索拿一批结果
+    if trace is not None:
+        trace["dense_ms"] = (perf_counter() - started) * 1000
+        trace["dense_candidate_count"] = len(dense_ids)
+    started = perf_counter()
     sparse_ids = search_sparse(query, embedding_records, top_k)  # 用 sparse 检索再拿一批结果
+    if trace is not None:
+        trace["sparse_ms"] = (perf_counter() - started) * 1000
+        trace["sparse_candidate_count"] = len(sparse_ids)
+    started = perf_counter()
     merged_ids = rrf_fusion(dense_ids, sparse_ids, top_k=top_k)
+    if trace is not None:
+        trace["fusion_ms"] = (perf_counter() - started) * 1000
+        trace["fused_candidate_count"] = len(merged_ids)
     source_map = build_source_map(merged_ids, dense_ids, sparse_ids)
     return merged_ids, source_map
 
@@ -103,6 +121,7 @@ def search_hybrid_rerank_with_sources(
     query: str,
     embedding_records: list[EmbeddingRecord],
     top_k: int,
+    trace: dict | None = None,
 ) -> tuple[list[int], list[dict]]:
     """
     最小 hybrid rerank。
@@ -112,17 +131,36 @@ def search_hybrid_rerank_with_sources(
     # 可能还没来得及参与 rerank，就已经被截断掉了。
     candidate_k = min(len(embedding_records), max(20, top_k * 5))
 
+    started = perf_counter()
     query_vec = embed_query(query)
+    if trace is not None:
+        trace["embedding_ms"] = (perf_counter() - started) * 1000
+    started = perf_counter()
     ensure_hnsw_index_loaded(embedding_records)
     dense_ids = search_core_hnsw(query_vec, candidate_k)
+    if trace is not None:
+        trace["dense_ms"] = (perf_counter() - started) * 1000
+        trace["dense_candidate_count"] = len(dense_ids)
+    started = perf_counter()
     sparse_ids = search_sparse(query, embedding_records, candidate_k)
+    if trace is not None:
+        trace["sparse_ms"] = (perf_counter() - started) * 1000
+        trace["sparse_candidate_count"] = len(sparse_ids)
+    started = perf_counter()
     merged_ids = rrf_fusion(dense_ids, sparse_ids, top_k=candidate_k)
+    if trace is not None:
+        trace["fusion_ms"] = (perf_counter() - started) * 1000
+        trace["fused_candidate_count"] = len(merged_ids)
     # 先拿到一个”更宽”的候选集，再交给 reranker 做排序纠偏。
+    started = perf_counter()
     reranked_ids = rerank_candidates(
         query=query,
         candidate_ids=merged_ids,
         embedding_records=embedding_records,
         top_k=top_k,
     )
+    if trace is not None:
+        trace["rerank_ms"] = (perf_counter() - started) * 1000
+        trace["rerank_candidate_count"] = len(merged_ids)
     source_map = build_source_map(reranked_ids, dense_ids, sparse_ids)
     return reranked_ids, source_map

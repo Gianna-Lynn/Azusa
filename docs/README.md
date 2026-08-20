@@ -51,6 +51,9 @@ cargo run --release --bin sift1m_benchmark -- --mode hnsw --base-limit 1000 --qu
 - Answerer 固定输出结论、证据、引用来源和不确定性；citation 只接受当前 evidence 中真实存在的 chunk id。
 - 15 题 Agent Eval 覆盖 single-hop、query rewrite、multi-hop、证据不足和历史 citation badcase。
 - `rag/run.py` 统一调度 chunk、embed、search、eval、workflow、agent 和 agent-eval。
+- Knowledge Base v1 支持多格式文本层、内容寻址 chunk、manifest、增量 embedding 复用和删除语义。
+- Metadata Filter / 最小 ACL 支持 tenant、department、visibility 与 tags，并显式记录 post-filter 风险。
+- Benchmark Lab 统一输出 Hit/Recall/MRR/nDCG 与 P50/P95 latency，支持多 artifact 实验矩阵。
 
 ## 文档入口
 
@@ -67,7 +70,8 @@ cargo run --release --bin sift1m_benchmark -- --mode hnsw --base-limit 1000 --qu
 ## 当前限制
 
 - HTTP 服务仍是内存索引，服务重启后记录会丢失。
-- 暂无持久化、删除、更新、批量导入和并发压测。
+- Rust HNSW 仍是内存加速层；更新/删除通过持久 artifact 同步后重启并确定性重建，暂无 WAL 或在线 compaction。
+- Metadata filter 当前使用 over-fetch 后过滤，不等价于原生 filtered ANN。
 - SIFT1M 原始数据不随仓库提交，benchmark 依赖本机或服务器上的 `data/sift1m/sift/`。
 - Query classification 和 multi-hop split 当前仍是确定性规则版，不是模型规划器。
 - 本地 0.5B Answerer 仍可能漏答、错实体或漏 citation；系统会保留结构化 trace 和不确定性供人工复核。

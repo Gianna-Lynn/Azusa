@@ -31,6 +31,7 @@ class CommandSpec:
 COMMAND_SPECS = [
     CommandSpec("chunk", "run_main", "Build chunks from data/raw into output/artifacts/chunks.jsonl."),
     CommandSpec("embed", "run_embed", "Build embeddings from chunks into output/artifacts/embedding.jsonl."),
+    CommandSpec("kb-sync", "run_kb_sync", "Incrementally synchronize multi-format source documents and embeddings."),
     CommandSpec("search", "run_search", "Run one retrieval query and write output/search_runs/latest/."),
     CommandSpec("agent", "run_agent", "Run Search Agent v0 and write output/search_runs/latest/."),
     CommandSpec("agent-eval", "run_agent_eval", "Run the Stage 3 Agent sample set and save structured traces."),
@@ -40,6 +41,7 @@ COMMAND_SPECS = [
     CommandSpec("import-du-retrieval", "run_import_du_retrieval", "Convert a DuRetrieval snapshot into passages/eval jsonl."),
     CommandSpec("download-du-retrieval", "run_download_du_retrieval", "Download a local DuRetrieval sample snapshot."),
     CommandSpec("du-retrieval-workflow", "run_du_retrieval_workflow", "Run the DuRetrieval end-to-end workflow."),
+    CommandSpec("benchmark-lab", "run_benchmark_lab", "Run retrieval mode/top-k/chunk-artifact experiment matrices."),
 ]
 
 COMMAND_BY_NAME = {spec.name: spec for spec in COMMAND_SPECS}
@@ -66,7 +68,8 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     for spec in COMMAND_SPECS:
-        subparsers.add_parser(spec.name, help=spec.help_text)
+        # 子命令自己的模块负责完整参数与 --help；这里仅识别命令名并透传其余参数。
+        subparsers.add_parser(spec.name, help=spec.help_text, add_help=False)
 
     return parser
 

@@ -171,6 +171,12 @@ def chunk_to_embedding(chunk_record: ChunkRecord) -> EmbeddingRecord:
         embedding=embedding,
         page=chunk_record.page,
         text=chunk_record.text,
+        document_version=chunk_record.document_version,
+        content_hash=chunk_record.content_hash,
+        start_char=chunk_record.start_char,
+        end_char=chunk_record.end_char,
+        section_path=list(chunk_record.section_path),
+        metadata=dict(chunk_record.metadata),
     )
 
     return embedding_record
@@ -194,6 +200,12 @@ def chunk_to_embedding_batch(chunk_record_list: list[ChunkRecord]) -> list[Embed
             embedding=embedding,
             page=chunk_record.page,
             text=chunk_record.text,
+            document_version=chunk_record.document_version,
+            content_hash=chunk_record.content_hash,
+            start_char=chunk_record.start_char,
+            end_char=chunk_record.end_char,
+            section_path=list(chunk_record.section_path),
+            metadata=dict(chunk_record.metadata),
         )
         embedding_record_list.append(embedding_record)
 

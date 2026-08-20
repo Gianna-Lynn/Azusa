@@ -38,6 +38,7 @@ python run.py <command> [args]
 ```powershell
 python run.py chunk
 python run.py embed
+python run.py kb-sync
 python run.py search --mode brute --top-k 3
 python run.py search --mode hnsw --top-k 3
 python run.py search --mode hybrid_rerank --top-k 3 --with-answer
@@ -45,6 +46,7 @@ python run.py agent --mode hybrid_rerank --top-k 5 --with-answer
 python run.py agent-eval --mode bm25 --top-k 5
 python run.py eval --mode all --top-k 3
 python run.py workflow
+python run.py benchmark-lab --modes brute,bm25 --top-k 3,5
 python run.py import-hf-eval --length 20
 ```
 
@@ -117,7 +119,8 @@ Azusa 的评测目标不是宣称 RAG / Agent 达到 SOTA，而是让检索行�
 - `docs/badcase_v1.md`：Stage 2 badcase taxonomy。
 - `docs/agent_tool_demo.md`：Search Agent v0 demo、输出字段和当前限制。
 - `docs/azusa_f1_cases.md`：可在 README / 面试 / 简历说明中复用的代表性 case。
-- `..\docs\interview_qa.md`：Azusa 项目追问、回答草稿和简历 bullet 草稿。
+- `..\docs\failure_matrix.md`：Azusa v2 失败边界、残余风险和面试追问。
+- `..\docs\future_learning_plan.md`：未来 L1/L2/L3 教学分支规划（当前答案分支不执行）。
 
 ## 常见问题
 

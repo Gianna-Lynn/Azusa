@@ -144,7 +144,7 @@ def test_service_rejects_invalid_chunk_id(service, chunk_id) -> None:
 
 
 def test_tracked_fixture_supports_reproducible_bm25_contract() -> None:
-    """仓库内小型 fixture 必须独立支撑 TODO12 的 stromules 正向闭环。"""
+    """仓库内小型 fixture 必须独立支撑 AZUSA-GW-05（Kaiji TODO 12）的 stromules 正向闭环。"""
 
     fixture_service = KaijiGatewayService(load_embedding_records(FIXTURE_PATH))
 

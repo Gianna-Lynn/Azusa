@@ -112,11 +112,11 @@ def search_records_with_sources(
         if trace is not None:
             trace["sparse_ms"] = (perf_counter() - started) * 1000
             trace["sparse_candidate_count"] = len(top_k_list)
-        source_map = [{"id": record_id, "source": "bm25 sparse"} for record_id in top_k_list]
+        source_map = [{"id": record_id, "source": "bm25 sparse"} for record_id in top_k_list]   # 搜索数据流研究 top_k_list = [1, 3] , source_map = [ {"id": 1, "source": "bm25 sparse"}, {"id": 3, "source": "bm25 sparse"}, ]
     else:
         raise ValueError("Search mode must be bm25, brute, hnsw, hybrid,or hybrid_rerank")
 
-    result_records = ids_to_records(top_k_list, embedding_records)
+    result_records = ids_to_records(top_k_list, embedding_records) # 搜索数据流研究 result_records = [ record_B,  record_D, ]
     if filtered_request:
         if trace is not None:
             trace["pre_filter_count"] = len(result_records)

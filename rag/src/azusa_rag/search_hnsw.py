@@ -37,16 +37,16 @@ def post_json(url: str, request_dict: dict) -> dict:
     """
     对给定 URL 发 JSON POST 请求，返回解析后的 JSON 字典。
     """
-    request_json = json.dumps(request_dict, ensure_ascii=False)
-    request_body = request_json.encode("utf-8")
+    request_json = json.dumps(request_dict, ensure_ascii=False) # 把字典构造成JSON
+    request_body = request_json.encode("utf-8")                 # 编码成 UTF-8 bytes
     request = urllib.request.Request(
         url=url,
         data=request_body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
+        headers={"Content-Type": "application/json"},           # 设置 Content-Type: application/json
+        method="POST",                                          # 发送 POST
     )
     with urllib.request.urlopen(request) as response:
-        return read_json_response(response)
+        return read_json_response(response)                     # 解析 JSON
 
 
 def post_json_no_response(url: str, request_dict: dict) -> None:

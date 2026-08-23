@@ -39,7 +39,7 @@ class EmbeddingRecord:
     start_char: Optional[int] = None
     end_char: Optional[int] = None
     section_path: list[str] = field(default_factory=list)
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict) # 存放department、visibility、tags、tenant 等知识库属性。
     
     def to_dict(self) -> dict:  # 本方法可以把EmbeddingRecord这个对象变成普通字典, 字典适合json.dumps(...)
         return asdict(self)

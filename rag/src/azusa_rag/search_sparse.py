@@ -149,6 +149,7 @@ def search_sparse(
     """
     最小 BM25 sparse 检索内核。
     在 Python 侧临时构建 BM25 索引，返回 top-k id。
+    输出：对于自然语言查询query, 查找top_k个命中记录, 输出它们在 embedding_records 中的列表下标
     """
     query_tokens = tokenize_for_bm25(query)
     if not query_tokens:
@@ -161,3 +162,29 @@ def search_sparse(
     score_id_list = [(float(score), record_id) for record_id, score in enumerate(score_array)]
     score_id_list.sort(key=lambda item: (-item[0], item[1]))
     return [record_id for _, record_id in score_id_list[:top_k]]
+
+    # 搜索数据流研究
+    # score_array = [
+    #     0.2,  # record_A
+    #     4.8,  # record_B
+    #     1.1,  # record_C
+    #     3.0,  # record_D
+    # ]
+    # score_id_list = [
+    #     (0.2, 0),  # record_A 的分数是 0.2，位置是 0
+    #     (4.8, 1),  # record_B 的分数是 4.8，位置是 1
+    #     (1.1, 2),  # record_C 的分数是 1.1，位置是 2
+    #     (3.0, 3),  # record_D 的分数是 3.0，位置是 3
+    # ]
+    # record_id 实际上是 embedding_records 的列表下标.
+    # 排序后:
+    # score_id_ list = [
+    #     (4.8, 1),  # record_B
+    #     (3.0, 3),  # record_D
+    #     (1.1, 2),  # record_C
+    #     (0.2, 0),  # record_A
+    # ]
+    # 取top_k = 2
+    # top_k_list = [1, 3]
+    # 这里的1表示: embedding_records[1]  # record_B
+    # 而不是表示: chunk_id == 1

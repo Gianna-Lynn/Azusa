@@ -1,25 +1,43 @@
 # Azusa
 
-Azusa is a retrieval and knowledge-base research system with a Rust HNSW index and a Python RAG pipeline.
+Azusa 是一个 Rust HNSW 向量检索与 Python RAG 实验项目，关注从索引、混合检索到证据引用的完整链路。
+[Kaiji](https://github.com/Gianna-Lynn/Kaiji) 在其上通过 HTTP/Tool Adapter 实现单 Agent 应用。
 
-## Branches
+## 项目重点
 
-- `main`: 课程主线，保留完整协议、数据模型、测试和 L1/L2/L3 TODO。
-- `solution/azusa-v2`: 与课程契约对应的完整可运行参考实现。
+- **检索底层**：Rust HNSW 索引、向量记录与 metadata 查询、Axum HTTP 服务，以及 SIFT1M 召回率与延迟实验。
+- **RAG 链路**：Dense、BM25、RRF Hybrid、rerank、回答引用与 Search Agent trace。
+- **工程边界**：通过 manifest、chunk 身份、失败案例与回归评测，检查检索结果如何成为可追踪的回答证据。
 
-Azusa v2 的学习顺序见 [课程任务书](rag/docs/azusa_v2_assignment.md)。
+当前默认分支 `main` 保留作者的课程进度，部分 Knowledge Base、Filter 等能力仍有明确 TODO。
+完整参考实现位于 [`solution/azusa-v2`](https://github.com/Gianna-Lynn/Azusa/tree/solution/azusa-v2)。
+下面的 Rust 最小演示直接使用 `main` 已有的公共 API，不依赖 Python 课程 TODO。
 
-## 完整答案能力
+## 最小体验
 
-- Rust HNSW insert/search/record HTTP service and SIFT1M recall/latency experiments.
-- Dense, BM25, RRF hybrid, and hybrid+rerank retrieval.
-- Answer citations, Search Agent traces, regression eval, and representative bad cases.
-- Knowledge Base v1 with multi-format ingestion, content-addressed chunk identity, document manifests,
-  incremental embedding reuse, deletion semantics, metadata filtering, and a minimal tenant/visibility ACL.
-- Retrieval Benchmark Lab with Hit@k, Recall@k, MRR, nDCG@k, P50/P95 latency, JSON/CSV/Markdown output,
-  and support for comparing multiple prebuilt chunk variants.
+需要 Rust stable 工具链和 Cargo；首次构建需要下载 Cargo 依赖。在仓库根目录执行：
 
-## Architecture
+```powershell
+cargo run --locked --example retrieval_demo
+```
+
+演示内置三篇简短文本和三维预设向量，完成建索引、top-1 搜索、按 ID 取回记录，再通过 ID 映射展示原文。
+无需 API Key、Python、GPU、模型权重或 HTTP 服务，不读取或覆盖现有 RAG 产物。
+
+预期标准输出：
+
+```text
+已索引 3 篇示例文本（预设向量，非模型编码）。
+查询：Azusa 的索引重启后会保留吗？
+命中：id=1, score=1.000, chunk_id=demo-1
+原文：Azusa 的 Rust HNSW 索引保存在内存中，进程重启后需要重建。
+已按 ID 取回同一条向量记录与来源信息。
+```
+
+向量与查询的对应关系由示例手工设置；该演示只验证索引接口和 ID 映射，不衡量自然语言理解、RAG 回答质量或检索性能。
+实现见 [`examples/retrieval_demo.rs`](examples/retrieval_demo.rs)。
+
+## 架构与分支
 
 ```text
 documents -> KB manifest -> stable chunks -> embeddings
@@ -32,41 +50,30 @@ documents -> KB manifest -> stable chunks -> embeddings
                                                      Kaiji gateway
 ```
 
-以下架构由 `solution/azusa-v2` 完整实现；`main` 保持相同公开边界，但核心训练点会以
-`NotImplementedError` 精确标记。
+上图描述完整参考实现的链路。manifest 与 chunk/embedding 产物作为持久事实来源，Rust HNSW 是可重建的内存加速层。
 
-The durable truth is the manifest plus chunk/embedding artifacts. The Rust HNSW server remains an
-in-memory acceleration layer and is deterministically rebuilt after a knowledge-base change.
+| 分支 | 用途 |
+|---|---|
+| `main` | 课程进度、公开契约与测试；部分核心训练点以 `NotImplementedError` 标记 |
+| `solution/azusa-v2` | Knowledge Base 增量同步、metadata filter、最小 ACL 与 Benchmark Lab 等完整参考实现 |
 
-## Quick start
+Python RAG 的模型、数据和安装要求见 [RAG 指南](rag/RAG_README.md)。默认模型配置使用本机路径和 CUDA，
+运行前需要按自己的环境核对；`main` 中的 `kb-sync` 等课程入口不作为开箱即用演示。
 
-```powershell
-cd rag
-python run.py kb-sync
-python run.py search --mode bm25 --query-text "your query"
-python run.py benchmark-lab --modes bm25,brute --top-k 3,5
-```
+## 结果与设计记录
 
-HNSW and hybrid modes require the Rust service:
+- [SIFT1M 实验](docs/benchmark.md)：已有 100k 调参与 1M sweep 历史摘要，附配置、规模和复测命令；最小演示不代替性能实验。
+- [Search Agent 回归基线](rag/docs/stage3_agent_eval.md)：15 条工程回归样例，分别记录检索与引用结果。
+- [回答与引用失败案例](rag/docs/badcase_v1.md)：保留错实体、漏答和错误引用，便于追踪限制。
+- [HTTP API](docs/http_api.md)、[Knowledge Base 设计](docs/knowledge_base_v1.md)、[失败矩阵](docs/failure_matrix.md)。
+- [项目详细指南](docs/README.md)、[课程任务书](rag/docs/azusa_v2_assignment.md)、[课程要求追踪](rag/docs/azusa_v2_traceability.md)。
 
-```powershell
-cargo run --bin azusa_server
-```
+以上评测记录均有各自的时间与适用范围，不代表当前提交重新测得的成绩，也不作为公开 benchmark 排名。
 
-## Evidence and design notes
+## 当前边界
 
-- [Detailed project guide](docs/README.md)
-- [HTTP API](docs/http_api.md)
-- [SIFT1M benchmark](docs/benchmark.md)
-- [RAG guide](rag/RAG_README.md)
-- [Knowledge Base v1](docs/knowledge_base_v1.md)
-- [Failure matrix](docs/failure_matrix.md)
-- [Azusa v2 课程任务书](rag/docs/azusa_v2_assignment.md)
-- [课程要求追踪](rag/docs/azusa_v2_traceability.md)
+- Rust 服务使用内存索引，暂无 WAL、分布式分片或在线 compaction。
+- 参考实现的 metadata filter 采用 over-fetch 后过滤，可能不足 `k` 条，不等价于原生 filtered ANN。
+- 小型回归集用于检查工程行为；本地小模型仍可能产生错误答案或遗漏引用。
 
-## Honest boundaries
-
-- HNSW is currently in memory; Azusa does not claim WAL, mmap, distributed shards, or online compaction.
-- Metadata filtering uses over-fetch then filter in v1; this can return fewer than `k` results and is not
-  equivalent to a native filtered ANN index.
-- The checked-in eval sets are engineering regression assets, not claims of public-benchmark SOTA.
+Azusa（あずさ，梓号）的名字来自 JR 东日本中央本线特急列车；Kaiji（かいじ，甲斐路号）是同线的另一班列车。

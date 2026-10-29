@@ -1,0 +1,6 @@
+{"doc_id":"retrieval","chunk_id":"azusa-hnsw","chunk_index":0,"source":"synthetic_notes.txt","embedding":[0.0,0.0],"page":null,"text":"Azusa provides HNSW vector retrieval with an immutable in-memory snapshot."}
+{"doc_id":"runtime","chunk_id":"kaiji-checkpoint","chunk_index":0,"source":"synthetic_notes.txt","embedding":[0.0,0.0],"page":null,"text":"Kaiji uses SQLite checkpoints to resume a paused workflow across fresh connections."}
+{"doc_id":"fusion","chunk_id":"rrf-fusion","chunk_index":0,"source":"synthetic_notes.txt","embedding":[0.0,0.0],"page":null,"text":"Reciprocal rank fusion combines dense and sparse rankings without comparing raw scores."}
+{"doc_id":"misc","chunk_id":"weather","chunk_index":0,"source":"synthetic_notes.txt","embedding":[0.0,0.0],"page":null,"text":"The weather station records daily rain and temperature measurements."}
+{"doc_id":"misc","chunk_id":"railway","chunk_index":1,"source":"synthetic_notes.txt","embedding":[0.0,0.0],"page":null,"text":"The railway timetable lists departure platforms and passenger services."}
+{"doc_id":"misc","chunk_id":"garden","chunk_index":2,"source":"synthetic_notes.txt","embedding":[0.0,0.0],"page":null,"text":"Garden flowers need water and sunlight in spring."}

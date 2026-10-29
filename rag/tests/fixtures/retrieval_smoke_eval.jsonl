@@ -1,0 +1,3 @@
+{"query_id":"snapshot","query":"Azusa HNSW immutable snapshot","reference_answer":"Azusa provides an immutable in-memory HNSW snapshot.","relevant_chunk_ids":["azusa-hnsw"],"expected_citations":["azusa-hnsw"],"case_type":"synthetic_protocol"}
+{"query_id":"resume","query":"Kaiji SQLite checkpoints resume","reference_answer":"SQLite checkpoints resume the workflow.","relevant_chunk_ids":["kaiji-checkpoint"],"expected_citations":["kaiji-checkpoint"],"case_type":"synthetic_protocol"}
+{"query_id":"fusion","query":"reciprocal rank fusion dense sparse rankings","reference_answer":"RRF combines rankings.","relevant_chunk_ids":["rrf-fusion"],"expected_citations":["rrf-fusion"],"case_type":"synthetic_protocol"}

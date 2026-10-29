@@ -35,7 +35,7 @@ COMMAND_SPECS = [
     CommandSpec("search", "run_search", "Run one retrieval query and write output/search_runs/latest/."),
     CommandSpec("agent", "run_agent", "Run Search Agent v0 and write output/search_runs/latest/."),
     CommandSpec("agent-eval", "run_agent_eval", "Run the Stage 3 Agent sample set and save structured traces."),
-    CommandSpec("eval", "run_eval", "Run retrieval eval and write output/eval_runs/latest/."),
+    CommandSpec("eval", "run_eval", "Run retrieval eval into a new output/eval_runs/runs/ directory."),
     CommandSpec("workflow", "run_workflow", "Run the consolidated workflow and write output/eval_runs/latest/."),
     CommandSpec("import-hf-eval", "run_import_hf_eval", "Import a Hugging Face QA sample snapshot."),
     CommandSpec("import-du-retrieval", "run_import_du_retrieval", "Convert a DuRetrieval snapshot into passages/eval jsonl."),

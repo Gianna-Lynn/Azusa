@@ -144,17 +144,21 @@ def search(
     embedding_records: list[EmbeddingRecord],
     top_k: int,
     mode: str = "brute",
+    *,
+    trace: dict | None = None,
 ) -> list[EmbeddingRecord]:
     """
     对外保留的最小门面。
     如果调用方只关心最终命中的记录，而不关心每条记录来自 dense / sparse 哪一路，
     就继续用这个函数。
+    评测可传入独立 trace 字典，保存实际后端与耗时，不改变返回值结构。
     """
     result_records, _ = search_records_with_sources(
         query=query,
         embedding_records=embedding_records,
         top_k=top_k,
         mode=mode,
+        trace=trace,
     )
     return result_records
 

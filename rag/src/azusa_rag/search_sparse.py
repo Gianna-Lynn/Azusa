@@ -9,6 +9,7 @@ sparse 检索和轻量 rerank 的 helper。
 from __future__ import annotations
 
 import re
+import math
 import warnings
 
 from rank_bm25 import BM25Okapi
@@ -102,11 +103,14 @@ def rerank_candidates(
     candidate_ids: list[int],
     embedding_records: list[EmbeddingRecord],
     top_k: int,
+    *,
+    trace: dict | None = None,
 ) -> list[int]:
     """
     对候选集合做一次 rerank。
     优先尝试模型 reranker；如果模型不可用或推理失败，再回退到规则 rerank。
     同分时尽量保持原始召回顺序稳定。
+    提供 trace 时记录实际模型/规则后端和回退原因，避免把降级结果记作模型成绩。
     """
     try:
         candidate_texts = []
@@ -117,6 +121,8 @@ def rerank_candidates(
         model_scores = score_query_passage_pairs(query, candidate_texts)
         if len(model_scores) != len(candidate_ids):
             raise ValueError("Reranker score count does not match candidate count.")
+        if any(not math.isfinite(score) for score in model_scores):
+            raise ValueError("Reranker scores must be finite.")
 
         rerank_items = []
         for original_rank, (candidate_id, rerank_score) in enumerate(zip(candidate_ids, model_scores)):
@@ -124,8 +130,13 @@ def rerank_candidates(
 
         # 模型分数优先；如果分数相同，仍尽量保留原始召回顺序，避免结果抖动。
         rerank_items.sort(key=lambda item: (-item[0], item[1], item[2]))
+        if trace is not None:
+            trace["rerank_backend"] = "model"
         return [candidate_id for _, _, candidate_id in rerank_items[:top_k]]
     except Exception as error:
+        if trace is not None:
+            trace["rerank_backend"] = "rule_fallback"
+            trace["rerank_fallback_reason"] = f"{type(error).__name__}: {error}"
         warnings.warn(
             f"BGE reranker failed, falling back to rule-based rerank: {error}"
         )
@@ -152,7 +163,7 @@ def search_sparse(
     输出：对于自然语言查询query, 查找top_k个命中记录, 输出它们在 embedding_records 中的列表下标
     """
     query_tokens = tokenize_for_bm25(query)
-    if not query_tokens:
+    if not query_tokens or not embedding_records:
         return []
 
     bm25_index, _ = build_bm25_index(embedding_records)

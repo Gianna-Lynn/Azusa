@@ -158,6 +158,7 @@ def search_hybrid_rerank_with_sources(
         candidate_ids=merged_ids,
         embedding_records=embedding_records,
         top_k=top_k,
+        trace=trace,
     )
     if trace is not None:
         trace["rerank_ms"] = (perf_counter() - started) * 1000

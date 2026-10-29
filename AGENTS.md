@@ -79,6 +79,7 @@ cargo run --release --bin sift1m_benchmark -- --mode hnsw --base-limit 1000 --qu
 | --- | --- | --- |
 | `GET` | `/health` | 返回服务状态和 `record_count` |
 | `POST` | `/insert` | 插入一个 `VectorRecord`；重复 ID 返回 `409` |
+| `POST` | `/index/load` | 向空服务原子装载带数据指纹的完整快照；冲突返回 `409` |
 | `POST` | `/search` | 接收 query vector，返回带 `id`/`score` 的 top-k 结果 |
 | `GET` | `/record/:id` | 按 ID 取回完整记录；不存在返回 `404` |
 
@@ -137,7 +138,7 @@ python run.py du-retrieval-workflow
 | `hybrid` | dense + sparse | HNSW dense 与 BM25 通过 RRF 融合 |
 | `hybrid_rerank` | dense + sparse + rerank | 扩大候选集后使用 reranker 重排 |
 
-`hnsw`、`hybrid` 和 `hybrid_rerank` 需要先启动 `azusa_server`；服务默认地址为 `http://127.0.0.1:3000`。服务中已有非空索引但数量与当前 embedding 不一致时，Python 侧会拒绝静默复用，应重启服务。
+`hnsw`、`hybrid` 和 `hybrid_rerank` 需要先启动 `azusa_server`；服务默认地址为 `http://127.0.0.1:3000`。Python 按完整有序记录的指纹和数量确认快照，搜索同时携带指纹。不同快照、手工非空索引或旧服务不能静默复用，应重启更新后的服务；已绑定快照拒绝 `/insert` 追加。协议和 P0-A 验证命令见 `docs/http_api.md`。
 
 ### Python 关键模块
 

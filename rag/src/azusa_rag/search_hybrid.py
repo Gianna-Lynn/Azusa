@@ -98,8 +98,8 @@ def search_hybrid_with_sources(
     if trace is not None:
         trace["embedding_ms"] = (perf_counter() - started) * 1000
     started = perf_counter()
-    ensure_hnsw_index_loaded(embedding_records)
-    dense_ids = search_core_hnsw(query_vec, top_k)  # 用 dense 检索拿一批结果
+    fingerprint = ensure_hnsw_index_loaded(embedding_records)
+    dense_ids = search_core_hnsw(query_vec, top_k, dataset_fingerprint=fingerprint)
     if trace is not None:
         trace["dense_ms"] = (perf_counter() - started) * 1000
         trace["dense_candidate_count"] = len(dense_ids)
@@ -136,8 +136,8 @@ def search_hybrid_rerank_with_sources(
     if trace is not None:
         trace["embedding_ms"] = (perf_counter() - started) * 1000
     started = perf_counter()
-    ensure_hnsw_index_loaded(embedding_records)
-    dense_ids = search_core_hnsw(query_vec, candidate_k)
+    fingerprint = ensure_hnsw_index_loaded(embedding_records)
+    dense_ids = search_core_hnsw(query_vec, candidate_k, dataset_fingerprint=fingerprint)
     if trace is not None:
         trace["dense_ms"] = (perf_counter() - started) * 1000
         trace["dense_candidate_count"] = len(dense_ids)

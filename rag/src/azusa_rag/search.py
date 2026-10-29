@@ -95,8 +95,8 @@ def search_records_with_sources(
         if trace is not None:
             trace["embedding_ms"] = (perf_counter() - started) * 1000
         started = perf_counter()
-        ensure_hnsw_index_loaded(embedding_records)
-        top_k_list = search_core_hnsw(query_vec=query_vec, top_k=top_k)
+        fingerprint = ensure_hnsw_index_loaded(embedding_records)
+        top_k_list = search_core_hnsw(query_vec=query_vec, top_k=top_k, dataset_fingerprint=fingerprint)
         if trace is not None:
             trace["dense_ms"] = (perf_counter() - started) * 1000
             trace["dense_candidate_count"] = len(top_k_list)

@@ -100,7 +100,7 @@ def validate_search_request(query: Any, k: Any, mode: Any) -> tuple[str, int, st
             status=HTTPStatus.BAD_REQUEST,
             retryable=False,
         )
-    if mode not in SEARCH_MODES:
+    if not isinstance(mode, str) or mode not in SEARCH_MODES:
         raise GatewayError(
             "invalid_mode",
             f"Invalid mode. Expected mode must be one of {','.join(SEARCH_MODES)}, however mode is {type(mode)}.",
@@ -152,23 +152,23 @@ class KaijiGatewayService:
         #     {"id": 43, "source": "sparse"},
         # ]
         hits = list()
-        # 为避免source_map = None的情况, 使用索引读取source_map
+        # 来源标记可选；缺失或短于命中列表时仍必须保留证据。
         for index, embedding_record in enumerate(EmbeddingRecord_list):
             retrieval_source = None
             if source_map_list is not None and index < len(source_map_list):
                 retrieval_source = source_map_list[index].get("source")
-                hits.append({
-                    "chunk_id":embedding_record.chunk_id,   
-                    "text":embedding_record.text,
-                    "score":None, # Azusa定义的EmbeddingRecord没有score字段.
-                    "source":embedding_record.source,
-                    "page":embedding_record.page,
-                    "metadata":{
-                        "doc_id":embedding_record.doc_id,
-                        "chunk_index":embedding_record.chunk_index,
-                        "retrieval_source":retrieval_source,    # 从这个条目当中取回: {"id": 35, "source": "bm25 sparse"},
-                    },
-                })
+            hits.append({
+                "chunk_id": embedding_record.chunk_id,
+                "text": embedding_record.text,
+                "score": None,  # EmbeddingRecord 没有检索分数字段。
+                "source": embedding_record.source,
+                "page": embedding_record.page,
+                "metadata": {
+                    "doc_id": embedding_record.doc_id,
+                    "chunk_index": embedding_record.chunk_index,
+                    "retrieval_source": retrieval_source,
+                },
+            })
 
         return {"mode":mode, "hits":hits}
 

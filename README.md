@@ -7,10 +7,11 @@ Azusa 是一个 Rust HNSW 向量检索与 Python RAG 实验项目，用于比较
 
 - **检索底层**：Rust HNSW 索引、向量记录与 metadata 查询、Axum HTTP 服务，以及 SIFT1M 召回率与延迟实验。
 - **RAG 链路**：Dense、BM25、RRF Hybrid、rerank、回答引用与 Search Agent trace。
-- **知识库扩展（参考分支）**：manifest、稳定 chunk 身份、增量同步与 metadata filter，配套回归评测与失败案例。
+- **增量知识库**：稳定 chunk 身份、向量复用和版本化 manifest；metadata filter/ACL 的参考实现在答案分支。
 
-下面的 Rust 最小演示运行于 `main`。Knowledge Base、Filter 等扩展能力的参考实现位于
-[`solution/azusa-v2`](https://github.com/Gianna-Lynn/Azusa/tree/solution/azusa-v2)，分支状态见下表。
+下面的 Rust 最小演示运行于 `main`。P0/P1 已补齐当前主线的检索证据、评测与增量 KB；
+新增工作区能力、验证与合成 Flat/HNSW 实验见[P1 记录](docs/p1-validation.md)。
+Filter 等课程能力仍需区分 [`solution/azusa-v2`](https://github.com/Gianna-Lynn/Azusa/tree/solution/azusa-v2)，分支状态见下表。
 
 ## 最小体验
 
@@ -55,11 +56,11 @@ documents -> KB manifest -> stable chunks -> embeddings
 
 | 分支 | 用途 |
 |---|---|
-| `main` | 开发主线；Knowledge Base、Filter 等部分接口仍以 `NotImplementedError` 标记，Rust 最小演示可运行 |
+| `main` | 开发主线；当前检索、评测与增量 KB 已实现，Filter/ACL 仍有课程 TODO |
 | `solution/azusa-v2` | Knowledge Base 增量同步、metadata filter、最小 ACL 与 Benchmark Lab 等完整参考实现 |
 
 Python RAG 的模型、数据和安装要求见 [RAG 指南](rag/RAG_README.md)。默认模型配置使用本机路径和 CUDA，
-运行前需要按自己的环境核对；`main` 中的 `kb-sync` 等尚未实现的入口不作为开箱即用演示。
+运行前需要按自己的环境核对；`kb-sync` 需要可用的本地编码模型，离线契约测试使用向量替身。
 
 ## 结果与设计记录
 

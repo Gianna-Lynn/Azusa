@@ -5,8 +5,9 @@
 Azusa 是一个基于 HNSW 的向量检索 / RAG 实验项目。
 
 分支约定：`main` 是课程与 TODO 主线，`solution/azusa-v2` 是完整参考答案。下文标记为
-Knowledge Base v1 / Filter / Benchmark Lab 的能力在答案分支完整实现，在 `main` 按
-`rag/docs/azusa_v2_assignment.md` 分级练习。
+Filter/ACL 的能力仍需对照答案分支，在 `main` 按 `rag/docs/azusa_v2_assignment.md`
+分级练习。P0/P1 已在当前主线实现检索证据修复、Benchmark Lab 和增量 Knowledge Base；
+产物版本、实验与验证范围见 [P1 记录](p1-validation.md)。
 
 当前主线分两层：
 

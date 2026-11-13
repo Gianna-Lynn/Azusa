@@ -39,8 +39,18 @@ main 的实际验证：Python 全部交付测试 143 passed；Rust 全部测试 
 过滤参数，`kb-sync --help` 可用，Benchmark Lab 的 BM25 smoke 完成 k=1,3 两格并生成
 JSON/CSV/Markdown，输出位于 `rag/.cache/branch-reorg-main-smoke/`。
 
-develop 应保留四项练习产生的五个精确失败；solution 必须全部通过，不能使用跳过标记
-隐藏未完成任务。各分支的实际结果在对应分支补录。
+develop 实测：143 passed / 5 failed；JUnit 中五个失败均属于 `test_filters.py`，
+分别精确终止于 L1c、L1d、L2d、L2e 的 `NotImplementedError`，没有额外失败或跳过。
+四个练习文件逐字恢复自人的提交 `3779d11`，已完成的其余源码保持不变。
+
+solution 实测：170 passed，无失败或跳过。除了原有 148 项契约，还加入 22 项边界
+用例，覆盖显式非法假值、非对象载荷、空列表、None 和默认 ACL 不越权。
+旧答案的完整历史保留为合并祖先；公共源码采用 develop 的最新版本，评测继续使用
+请求 k 的 nDCG 分母，旧 CV 与废弃脚本不恢复。
+
+回退脚本已在独立的本地测试仓库演练：从 before.bundle 恢复历史、模拟分支整理、
+执行 rollback.ps1，再逐项比较原四个本地分支的名称与完整提交 ID，全部一致。
+演练没有修改真实仓库的分支；本地备份也不会改变远端状态。
 
 真实模型质量、GPU 性能和历史大规模实验不属于此次分支调整的复测范围；不把 fixture、
 向量替身或历史数字当作新测模型成绩。Python 保留已有 SWIG 弃用警告。

@@ -69,15 +69,40 @@ def _load_embedding_components() -> tuple:
 def _last_token_pool(last_hidden_states: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
     """
     使用Qwen官方推荐的last-token pooling方式提取embedding.
+
+    具体而言, 这种办法是:
+    模型会为输入文本中的每个 token 生成一个 hidden state，
+    形状通常为[sequence_length, hidden_size]. 
+    也就是说, 对于sequence_length个token, 
+    每个token都有一个hidden vector, 维度是hidden_size.
+    pooling 的作用是从这一串 token 向量中汇总出一个固定长度的文本向量，
+    方便后续进行相似度计算和向量检索.
+    last-token pooling 选择文本最后一个有效 token 的 
+    hidden state 作为整段文本的 embedding；
+    这里的“最后一个”指真实文本的最后一个 token，不是padding 补位 token.
     """
+    # attention_mask 的形状通常是 [batch_size, sequence_length].
+    # 左侧 padding 时，每条序列的最右侧位置都是真实 token，因此最后一列全为 1.
     left_padding = (attention_mask[:, -1].sum() == attention_mask.shape[0])
 
     if left_padding:
+        # 左侧 padding 的布局类似:
+        # [PAD, PAD, token_1, token_2, last_token]
+        # 所有样本的最后一个位置都是有效的 last token，直接取最后一列即可.
         return last_hidden_states[:, -1]
 
+    # 非左侧 padding 时，padding 通常在右侧，不同文本的最后一个有效 token
+    # 可能位于不同位置. attention_mask 每行求和得到有效 token 数量，
+    # 减 1 后转换为从 0 开始的最后有效 token 索引.
     sequence_lengths = attention_mask.sum(dim=1) - 1
+
+    # 为 batch 中的每条样本生成行号:
+    # [0, 1, 2, ..., batch_size - 1].
     batch_size = last_hidden_states.shape[0]
     batch_index = torch.arange(batch_size, device=last_hidden_states.device)
+
+    # 使用“每条样本的行号 + 该样本最后一个有效 token 的列号”
+    # 取出每条文本对应的最后一个 token 的 hidden state.
     return last_hidden_states[batch_index, sequence_lengths]
 
 
@@ -88,7 +113,7 @@ def embed_text_list(text_list: list[str]) -> list[list[float]]:
     if not text_list:
         return []
 
-    # 这里拿到的是“已经准备好的编码器组件”:
+    # 下面的_load_embedding_components()提供的是“已经准备好的编码器组件”:
     # tokenizer负责把字符串变成token id,
     # model负责把token序列变成hidden states,
     # model_device表示这次推理实际跑在cpu还是cuda上.
@@ -123,9 +148,9 @@ def embed_text_list(text_list: list[str]) -> list[list[float]]:
 
             # **的意思是“把字典摊开传参”.
             # 这里等价于 model(input_ids=..., attention_mask=..., ...)
-            # outputs.last_hidden_state 的shape通常是:
-            # (batch_size, sequence_length, hidden_size)
-            # 也就是: 一批文本里, 每个token都有一个hidden vector.
+            # outputs 是模型前向传播的返回对象, 其中 last_hidden_state 是形状为
+            # (batch_size, sequence_length, hidden_size) 的三维张量.
+            # 也就是: batch中的每段文本, 都会为每个token生成一个hidden vector.
             outputs = model(**batch_dict)
 
             # 但我们最终需要的是“每段文本一个向量”, 不是“每个token一个向量”.

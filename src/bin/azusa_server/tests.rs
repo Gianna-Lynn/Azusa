@@ -131,13 +131,13 @@ async fn empty_snapshot_is_bound_and_manual_index_is_not_adopted() {
 }
 
 #[tokio::test]
-/// 使用超过旧固定容量的 k，确认服务按 k 扩大 ef，而不是静默截断到 16。
+/// 使用超过旧固定容量的 k，确认服务按 k 扩大 ef_search，而不是静默截断到 16。
 async fn candidate_budget_covers_k_above_sixteen() {
     let app = app();
     let fingerprint = "a".repeat(64);
     assert_eq!(call(&app, "POST", "/index/load", snapshot(&fingerprint, 25)).await.0, StatusCode::OK);
-    for ef in [Value::Null, json!(1), json!(16), json!(40)] {
-        let (status, result) = call(&app, "POST", "/search", json!({"vector":[1.0,0.0],"k":20,"ef_search":ef,"dataset_fingerprint":fingerprint})).await;
+    for ef_search in [Value::Null, json!(1), json!(16), json!(40)] {
+        let (status, result) = call(&app, "POST", "/search", json!({"vector":[1.0,0.0],"k":20,"ef_search":ef_search,"dataset_fingerprint":fingerprint})).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(result["results"].as_array().unwrap().len(), 20);
     }

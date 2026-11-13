@@ -193,12 +193,12 @@ def write_search_outputs(
 
 def run_search_result(
     query: str,
-    embedding_records: list[EmbeddingRecord],
-    mode: str,
-    top_k: int,
-    with_answer: bool = False,
-    metadata_filter: MetadataFilter | None = None,
-    access_context: AccessContext | None = None,
+    embedding_records: list[EmbeddingRecord],       # 所有可检索的 EmbeddingRecord 列表
+    mode: str,                  # 检索模式, 目前支持 "brute" / "hnsw"
+    top_k: int,                 # 最终返回的 top-k 结果数, 也就是用户最关心的命中记录数
+    with_answer: bool = False,  # 是否在搜索结果上再跑一次 answerer, 生成最终答案文本
+    metadata_filter: MetadataFilter | None = None,  # 可选的元数据过滤器, 用于筛掉不符合条件的记录
+    access_context: AccessContext | None = None,    # 可选的访问控制上下文, 用于过滤掉用户无权访问的记录
 ) -> dict:
     """
     对单条 query 执行一次完整搜索，并返回统一结果字典。

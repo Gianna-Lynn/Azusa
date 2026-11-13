@@ -119,7 +119,7 @@ mod tests {
     }
 
     #[test]
-    /// 重复排列、错误维度及 ef<k 必须在建图前拒绝。
+    /// 重复排列、错误维度及 ef_search<k 必须在建图前拒绝。
     fn invalid_input_is_rejected() {
         let mut input = Input { base: vec![vec![1.0], vec![2.0]], queries: vec![vec![1.0]],
             order: vec![0, 1], algorithm: "hnsw".into(), k: 1, ef_search: 8, m: 4, ef_construction: 40 };

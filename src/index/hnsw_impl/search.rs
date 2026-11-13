@@ -11,11 +11,21 @@ use super::super::hnsw_stats::SearchLayerStats;
 use super::super::HnswIndex;
 
 impl HnswIndex {
-    /// 从当前入口点出发，先逐层贪心下探到第 0 层，再返回第 0 层的候选结果。
+    /// 搜索的内部通用起点：从入口点逐层贪心下探到第 0 层，并返回该层候选。
     ///
-    /// 这是 `search_knn` / `search_knn_with_scores` 的内部通用起点。
-    /// 如果图里还没有任何节点，就直接返回空集合。
-    fn search_top_k_candidates(&mut self, query: &Vector, ef_search: usize) -> Vec<(usize, f32)> {
+    /// 这是 `search_knn` / `search_knn_with_scores` 共用的内部入口，完整流程为：
+    /// 从最高层开始逐层用 `greedy_search_at_level` 找局部最优点，下探到第 0 层后
+    /// 再用 `search_layer` 收集候选。
+    ///
+    /// # Arguments
+    /// - `query`: 查询向量；
+    /// - `ef_search`: 第 0 层搜索时保留的候选数上限。
+    ///
+    /// # Returns
+    /// 最多 `ef_search` 个按相似度排序的 `(内部节点下标, 分数)`，不在此截取前 k 个；
+    /// 截取和转换为对外 `Id` 由上述公开接口完成。如果图里还没有任何节点，
+    /// 就直接返回空集合。
+    fn search_candidates(&mut self, query: &Vector, ef_search: usize) -> Vec<(usize, f32)> {
         let Some(mut current_entry_index) = self.entry_node_index else {
             return Vec::new();
         };
@@ -28,10 +38,18 @@ impl HnswIndex {
         candidates
     }
 
-    /// 对外返回 `(Id, score)` 形式的近似最近邻结果。
+    /// 对外查询入口：返回 `(Id, score)` 形式的近似最近邻结果。
     ///
-    /// `k` 控制最终返回多少个结果，`ef_search` 控制搜索时保留多少候选。
-    /// `score` 的含义取决于索引使用的度量方式：
+    /// 先走 `search_candidates` 拿到第 0 层候选，截取前 k 个，
+    /// 并把内部节点下标换算成对外的记录 `Id`。
+    ///
+    /// # Arguments
+    /// - `query`: 查询向量；
+    /// - `k`: 控制最终返回多少个结果；
+    /// - `ef_search`: 控制搜索时保留多少候选（内部预算，越大越精确、越慢）。
+    ///
+    /// # Returns
+    /// 按相似度降序的 `(Id, score)` 列表。`score` 的含义取决于索引使用的度量方式：
     /// - Cosine 时越大越相似；
     /// - L2 时这里转换成了“相似度形式”，数值越大越近。
     pub fn search_knn_with_scores(
@@ -40,23 +58,51 @@ impl HnswIndex {
         k: usize,
         ef_search: usize,
     ) -> Vec<(Id, f32)> {
-        self.search_top_k_candidates(query, ef_search)
+        self.search_candidates(query, ef_search)
             .into_iter()
             .take(k)
             .map(|(idx, score)| (self.get_id_by_index(idx), score))
             .collect()
     }
 
-    /// 在指定层上执行 HNSW 的层搜索。
+    /// 对外的简化查询接口：只返回 `Id` 列表，不带分数。
     ///
-    /// 这是整个查询路径里最核心的函数：
-    /// - `entry_index` 是当前层的起始入口；
-    /// - `level` 指定搜索哪一层；
-    /// - `ef` 决定要保留多少个候选结果。
+    /// 内部流程和 `search_knn_with_scores` 相同，只是丢弃了 score。
     ///
-    /// 返回值里：
-    /// - `Vec<(usize, f32)>` 是按相似度排序后的候选点 index 和分数；
-    /// - `SearchLayerStats` 用于统计这一轮循环跑了多少步。
+    /// # Arguments
+    /// - `query`: 查询向量；
+    /// - `k`: 控制最终返回多少个结果；
+    /// - `ef_search`: 控制搜索时保留多少候选。
+    ///
+    /// # Returns
+    /// 按相似度降序的 `Id` 列表。
+    pub fn search_knn(&mut self, query: &Vector, k: usize, ef_search: usize) -> Vec<Id> {
+        self.search_candidates(query, ef_search)
+            .into_iter()
+            .take(k)
+            .map(|(idx, _)| self.get_id_by_index(idx))
+            .collect()
+    }
+
+    /// HNSW 查询路径里最核心的函数：在指定层上执行一次层搜索。
+    ///
+    /// 从入口点出发，用候选堆 + 结果堆做最佳优先扩展：不断弹出最有希望的候选、
+    /// 扫描它的邻居，把值得保留的邻居加入两个堆，直到候选不可能再改进结果为止。
+    /// visited 标记、相似度缓存和堆都复用 `workspace`，避免每次查询重新分配大块内存。
+    ///
+    /// # Arguments
+    /// - `query`: 查询向量；
+    /// - `entry_index`: 当前层的起始入口；
+    /// - `level`: 指定搜索哪一层；
+    /// - `ef`: 决定要保留多少个候选结果；构建期调用方传入 ef_construction，查询期调用方传入 ef_search。
+    ///
+    /// # Returns
+    /// 二元组，包含：
+    /// - `Vec<(usize, f32)>`: 按相似度排序后的候选点 index 和分数；
+    /// - `SearchLayerStats`: 用于统计这一轮循环跑了多少步。
+    ///
+    /// # Panics
+    /// `ef` 小于 1 时 panic（内部断言）。
     pub fn search_layer(
         &mut self,
         query: &Vector,
@@ -66,41 +112,41 @@ impl HnswIndex {
     ) -> (Vec<(usize, f32)>, SearchLayerStats) {
         assert!(ef >= 1, "ef至少为1");
 
-        // 每次进入 search_layer 都先把工作区“逻辑上清空”：
+        // ---- 第一步：把工作区"逻辑上清空"，并拆出互不冲突的字段借用 ----
         // - visited 用 epoch 标记复用，不需要真的逐项写 false；
         // - candidate_heap / result_heap 直接清空；
-        // - similarity cache 也沿用 epoch 复用。
+        // - similarity cache 也沿用 epoch 复用，避免每次查询重新分配大块内存。
         let mut stats = SearchLayerStats::default();
         self.workspace
             .reset_search_layer_workspace(self.nodes.len());
         self.workspace.reset_similarity_cache(self.nodes.len());
+        // nodes 只读、workspace 独占可变——两个不同字段，编译器允许同时借。
         let nodes = &self.nodes;
         let metric = self.metric;
         let workspace = &mut self.workspace;
 
+        // ---- 第二步：用入口点初始化本轮搜索状态 ----
         // 入口点先标记为已访问，并作为初始候选/结果放入堆中。
         workspace.visited_marks[entry_index] = workspace.visited_epoch;
-
         let entry_similarity =
             Self::get_similarity_from_workspace(nodes, metric, workspace, entry_index, query);
-
-        // 用入口点的相似度初始化候选堆, candidate_heap是一个大根堆, 堆顶是当前最优的候选.
-        // 这里把index包成Reverse<usize>是为了在相似度相同的情况下优先扩展index小的点, 以实现稳定输出.
+        // candidate_heap 是大根堆，堆顶是当前最优的候选；
+        // index 包成 Reverse<usize> 是为了相似度相同时优先扩展 index 小的点，实现稳定输出。
         workspace.candidate_heap.push((
             ordered_float::NotNan::new(entry_similarity).unwrap(),
             std::cmp::Reverse(entry_index),
         ));
-
-        // 用入口点的相似度初始化结果堆, result_heap是一个小根堆, 堆顶是当前最差的结果.
+        // result_heap 是小根堆，堆顶是当前最差的结果。
+        // index 在这里不需要 Reverse, 如果有多个点的相似度分数都最差, 那么优先弹出 index 大的点, 也能保证稳定输出。
         workspace.result_heap.push((
             std::cmp::Reverse(ordered_float::NotNan::new(entry_similarity).unwrap()),
             entry_index,
         ));
-
-        // 目前结果堆里只有入口点, 所以最差的结果就是入口点的相似度. 后续候选如果不比这个相似度更好, 就没有必要加入堆了.
+        // 目前结果堆里只有入口点，所以最差的结果就是入口点的相似度；
+        // 后续候选如果不比这个相似度更好，就没有必要加入堆了。
         let mut worst_result_similarity = entry_similarity;
 
-        // 主循环：
+        // ---- 第三步：主循环（最佳优先扩展） ----
         // 1. 从 candidate_heap 取出当前最有希望扩展的点；
         // 2. 扫描它的邻居；
         // 3. 把没访问过、且值得保留的邻居加入候选集和结果集；
@@ -109,31 +155,34 @@ impl HnswIndex {
             workspace.candidate_heap.pop()
         {
             stats.loop_iterations += 1;
-
+            // 拆出原始 f32，方便和结果下界比较。
             let current_candidate_similarity = current_candidate_similarity.into_inner();
 
-            // HNSW只有在结果集已经填满ef后, 才能用当前最优候选差于结果集下界来提前停止.
-            // 现在的push invariant下len < ef时这个条件本来不可达(被visited判定挡住); 额外显式写出len判断是为了对齐标准语义.
+            // 3.1 提前停止：结果堆填满 ef 后，如果当前最优候选
+            // 的相似度仍低于结果堆中最差的相似度，就停止扩展。
+            // 点被接纳时会同时加入候选堆和结果堆；结果堆未填满时不会淘汰点，
+            // 所以当前候选仍在结果堆中，其相似度不可能低于结果堆的最低分。
+            // 填满后，结果堆可能淘汰仍留在候选堆中的点，才可能触发提前停止。
+            // 显式检查结果堆是否已满，是为了清楚表达这一标准搜索条件。
             if workspace.result_heap.len() >= ef
                 && current_candidate_similarity < worst_result_similarity
             {
                 break;
             }
 
-            // 当前候选所在层的所有邻居都会被看一遍。
+            // 3.2 扫描当前候选在第 level 层的所有邻居，
             // visited 标记保证同一个点不会在这一轮里被重复处理。
             let current_candidate_neighbors =
                 Self::get_neighbors_at_lvl_from_parts(nodes, current_candidate_index, level);
             for &neighbor_index in current_candidate_neighbors {
-                // 如果这个邻居已经被访问过了, 就跳过.
+                // 访问过就跳过；否则先标记，避免后续重复访问。
                 if workspace.visited_marks[neighbor_index] == workspace.visited_epoch {
                     continue;
                 }
-
-                // 标记这个邻居已经被访问过了, 避免后续重复访问.
                 workspace.visited_marks[neighbor_index] = workspace.visited_epoch;
 
-                // 计算邻居的相似度。这里利用了 SearchLayerWorkspace 里的 sim_marks 和 sim_values 来缓存相似度计算结果，避免重复计算。
+                // 用 workspace 里的 sim_marks / sim_values 缓存相似度计算结果，
+                // 同一个点在一轮里只算一次，避免重复计算。
                 let neighbor_similarity = Self::get_similarity_from_workspace(
                     nodes,
                     metric,
@@ -142,29 +191,26 @@ impl HnswIndex {
                     query,
                 );
 
-                // 如果这个邻居的相似度足够好, 大于等于当前结果堆里最差的相似度,
-                // 或者结果堆还没有填满 ef 个结果, 就把它加入候选堆和结果堆.
+                // 3.3 值得保留才入堆：邻居不低于当前结果堆里最差的相似度，
+                // 或者结果堆还没有填满 ef 个结果。
                 if neighbor_similarity >= worst_result_similarity
                     || workspace.result_heap.len() < ef
                 {
-                    // 加入候选堆. candidate_heap是一个大根堆, 堆顶是当前最优的候选.
+                    // 加入候选堆（大根堆，堆顶是当前最优的候选）。
                     workspace.candidate_heap.push((
                         ordered_float::NotNan::new(neighbor_similarity).unwrap(),
                         std::cmp::Reverse(neighbor_index),
                     ));
-
-                    // 加入结果堆. result_heap是一个小根堆, 堆顶是当前最差的结果.
+                    // 加入结果堆（小根堆，堆顶是当前最差的结果）。
                     workspace.result_heap.push((
                         std::cmp::Reverse(ordered_float::NotNan::new(neighbor_similarity).unwrap()),
                         neighbor_index,
                     ));
-
-                    // ef 是结果堆的容量上限，如果超过了这个容量，就先 pop 掉当前最差的结果，腾出空间。
+                    // ef 是结果堆的容量上限，超了就先 pop 掉当前最差的结果，腾出空间。
                     if workspace.result_heap.len() > ef {
                         workspace.result_heap.pop();
                     }
-
-                    // 取出当前结果堆里最差的相似度，更新 worst_result_similarity。
+                    // 重新读取结果堆堆顶，更新 worst_result_similarity（当前最差相似度）。
                     worst_result_similarity = workspace
                         .result_heap
                         .peek()
@@ -174,10 +220,10 @@ impl HnswIndex {
             }
         }
 
-        // result_heap 最终保存的是 top-ef 的结果，但它是个堆，不是排序好的 Vec。
-        // 这里把它倒出来并反转，形成“相似度降序、同分时 index 升序”的稳定输出。
-        // result_heap本轮之后不会再被读取, 下一次search_layer会reset/clear它.
-        // 连续pop会按"最差到最好"弹出; reverse后得到score降序且同分index升序的结果.
+        // ---- 第四步：把结果堆倒成有序 Vec ----
+        // result_heap 最终保存的是 top-ef 的结果，但它是个堆，不是排序好的 Vec：
+        // 连续 pop 按"最差到最好"弹出，reverse 后得到"相似度降序、同分时 index 升序"的稳定输出。
+        // result_heap 本轮之后不会再被读取，下一次 search_layer 会 reset/clear 它。
         let mut result_candidates = Vec::with_capacity(workspace.result_heap.len());
         while let Some((reverse_score, result_index)) = workspace.result_heap.pop() {
             result_candidates.push((result_index, reverse_score.0.into_inner()));
@@ -187,13 +233,20 @@ impl HnswIndex {
         (result_candidates, stats)
     }
 
-    /// 从某一层的入口点开始，只沿着“更近的邻居”不断往前走，直到局部最优。
+    /// 在指定层做贪心导航：只沿着“更近的邻居”往前走，直到局部最优。
     ///
-    /// 这相当于 HNSW 在高层使用的“贪心导航”：
+    /// 这是 HNSW 在高层使用的“贪心导航”策略：
     /// - 先看当前点的邻居；
     /// - 如果某个邻居比当前点更接近 query，就跳过去；
     /// - 重复这个过程，直到没有更好的邻居为止。
-    /// - 这个函数的输出是当前层的一个局部最优点，后续会从这个点开始进入下一层的搜索。
+    ///
+    /// # Arguments
+    /// - `query`: 查询向量；
+    /// - `entry_index`: 本层的起始入口；
+    /// - `level`: 在哪一层导航（只在当前层的邻居列表里找）。
+    ///
+    /// # Returns
+    /// 当前层的一个局部最优点（内部节点下标），后续会从这个点开始进入下一层的搜索。
     pub fn greedy_search_at_level(
         &mut self,
         query: &Vector,
@@ -248,12 +301,4 @@ impl HnswIndex {
         }
     }
 
-    /// 对外的简化查询接口，只返回 Id 列表，不带分数。
-    pub fn search_knn(&mut self, query: &Vector, k: usize, ef_search: usize) -> Vec<Id> {
-        self.search_top_k_candidates(query, ef_search)
-            .into_iter()
-            .take(k)
-            .map(|(idx, _)| self.get_id_by_index(idx))
-            .collect()
-    }
 }

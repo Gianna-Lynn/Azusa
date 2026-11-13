@@ -28,6 +28,7 @@ def get_query() -> str:
 def embed_query(query: str) -> list[float]:
     """
     用 embed_text_list 方法得到 query vector。
+    但这里我们只传一条 query，所以取第一个元素即可。
     """
     # embed_text_list 返回 list[list[float]]，
     # 但这里我们只传一条 query，所以取第一个元素即可。
@@ -48,24 +49,24 @@ def build_search_vecs(
     embedding_records: list[EmbeddingRecord],
 ) -> list[tuple[int, list[float]]]:
     """
-    把 EmbeddingRecord 列表变成 `(id, vector)` 列表。
+    把 EmbeddingRecord 列表变成 `(index, vector)` 列表。
     这样后面 brute / hnsw 这类检索内核就能直接吃。
     """
-    id_vector_list = []
+    index_vector_list = []
     for index, embedding_record in enumerate(embedding_records):
-        # 这里的 index 就是后面整个检索流程里复用的 record id。
-        id_vector_list.append((index, embedding_record.embedding))
-    return id_vector_list
+        # 这里的 index 就是后面整个检索流程里复用的记录下标。
+        index_vector_list.append((index, embedding_record.embedding))
+    return index_vector_list
 
 
-def ids_to_records(
-    record_ids: list[int],
+def indices_to_records(
+    record_indices: list[int],
     embedding_records: list[EmbeddingRecord],
 ) -> list[EmbeddingRecord]:
     """
-    用检索返回的 id 回查原始 EmbeddingRecord。
+    用检索返回的下标回查原始 EmbeddingRecord。
     """
     result_records = []
-    for record_id in record_ids:
-        result_records.append(embedding_records[record_id])
+    for record_index in record_indices:
+        result_records.append(embedding_records[record_index])
     return result_records

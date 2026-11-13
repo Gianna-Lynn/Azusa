@@ -67,6 +67,7 @@ Python RAG 的模型、数据和安装要求见 [RAG 指南](rag/RAG_README.md)�
 
 ## 结果与设计记录
 
+- [实验数字审查入口](docs/experiment-audit.zh-CN.md)：逐项回答数据集、规模、Baseline、Recall、延迟和性能代价，并链接原始报告与计算代码。
 - [SIFT1M 实验](docs/benchmark.md)：已有 100k 调参与 1M sweep 历史摘要，附配置、规模和复测命令；最小演示不代替性能实验。
 - [Search Agent 回归基线](rag/docs/stage3_agent_eval.md)：15 条工程回归样例，分别记录检索与引用结果。
 - [回答与引用失败案例](rag/docs/badcase_v1.md)：保留错实体、漏答和错误引用，便于追踪限制。

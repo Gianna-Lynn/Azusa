@@ -1,4 +1,4 @@
-# 本地三分支整理
+# 三分支整理与回退
 
 整理日期：2026-11-13。迁移基底是人的提交 `3779d11`，保留源码批注、命名整理与
 真实文本实验记录，不重跑或覆盖已有性能实验。
@@ -8,8 +8,34 @@
 - develop：包含 main 的公共改进，保留 V2 的四项 Filter/ACL 练习与验收测试。
 - solution：保留旧答案历史，吸收 develop 的改进，提供符合当前契约的 Filter/ACL。
 
-当前仅调整本地。远端分支和 remote-tracking refs 保持原样，远端答案名称仍为
-`origin/solution/azusa-v2`；未推送的新名称不代表远端页面已存在。
+第一阶段只调整本地，保留原远端状态。第二阶段将 main、develop、solution 发布到远端，
+移除旧远端名称 solution/azusa-v2，默认分支保持 main。三个本地分支分别跟踪同名远端。
+
+本地历史标签 toyvecdb-v0.1 标记早期 Stage 1，未发布到远端，无关联 Release 或仓库内引用；
+在完整备份注释标签对象后移除。对应提交仍在 main 历史，不删除历史代码。
+
+## 远端发布与恢复
+
+第二阶段的独立备份目录为 `local-experiments/remote-reorg-20261113/`，包含发布前的
+远端引用、本地分支、注释标签、Git 配置和完整 bundle，以及发布后的精确引用清单。
+main / develop 使用原引用的显式 lease 发布；旧答案名称删除后才建立 solution，
+避免 Git 的平级名称与嵌套名称冲突。发布使用显式分支 refspec，不自动上传标签。
+
+回退第二阶段（从仓库根目录运行）：
+
+```powershell
+& .\local-experiments\remote-reorg-20261113\rollback.ps1
+# 预览无误后：
+& .\local-experiments\remote-reorg-20261113\rollback.ps1 -Apply
+```
+
+脚本要求干净工作区，先保存当前提交历史；只有远端仍精确等于发布后的引用时才恢复，
+以显式 lease 防止覆盖后续工作。它恢复旧远端 main 与 solution/azusa-v2，移除新增远端
+develop / solution，同时恢复发布前的本地三分支、跟踪配置和注释标签。远端已有新提交
+时会停止，需要先审查差异。恢复完成后若还需撤销第一阶段，再使用下方本地回退脚本。
+
+回退已在独立的本地 Git 远端和克隆上演练，不通过改写真实远端来测试。备份目录不随
+clone 复制；请保留这些本地文件。GitHub 上展示或访问过的内容无法通过回退撤销传播。
 
 ## 备份与恢复
 

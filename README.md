@@ -2,6 +2,8 @@
 
 当前分支：`solution`。这里保存 Agent 参考答案，包含 develop 的公共改进与完整 Filter/ACL；人的开发与练习使用 `develop`，对外演示使用 `main`。
 
+本分支对应最新 develop 的答案：补全 L1c、L1d、L2d、L2e 的输入协议、metadata predicate 和最小 ACL，保留完整学习文档、源码注释与严格边界测试。其余公共实现与 develop 一致。
+
 Azusa 是一个 Rust HNSW 向量检索与 Python RAG 实验项目，用于比较检索策略并追踪回答证据。
 [Kaiji](https://github.com/Gianna-Lynn/Kaiji) 在其上通过 HTTP/Tool Adapter 实现单 Agent 应用。
 
@@ -67,6 +69,7 @@ Python RAG 的模型、数据和安装要求见 [RAG 指南](rag/RAG_README.md)�
 
 ## 结果与设计记录
 
+- [实验数字审查入口（develop）](https://github.com/Gianna-Lynn/Azusa/blob/develop/docs/experiment-audit.zh-CN.md)：草稿仅保存在 develop；从该分支查看实验口径、原始报告与计算代码。
 - [SIFT1M 实验](docs/benchmark.md)：已有 100k 调参与 1M sweep 历史摘要，附配置、规模和复测命令；最小演示不代替性能实验。
 - [Search Agent 回归基线](rag/docs/stage3_agent_eval.md)：15 条工程回归样例，分别记录检索与引用结果。
 - [回答与引用失败案例](rag/docs/badcase_v1.md)：保留错实体、漏答和错误引用，便于追踪限制。

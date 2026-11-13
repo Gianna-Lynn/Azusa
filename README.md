@@ -1,21 +1,18 @@
 # Azusa
 
-Azusa 是一个 Rust HNSW 向量检索与 Python RAG 实验项目，用于比较检索策略并追踪回答证据。
-[Kaiji](https://github.com/Gianna-Lynn/Kaiji) 在其上通过 HTTP/Tool Adapter 实现单 Agent 应用。
+Azusa 是 Rust HNSW 向量检索与 Python RAG 实验项目，用于比较检索策略，并追踪回答使用的证据。
+[Kaiji](https://github.com/Gianna-Lynn/Kaiji) 通过 HTTP 网关在其上构建单 Agent 应用。
 
-## 项目重点
+## 核心能力
 
-- **检索底层**：Rust HNSW 索引、向量记录与 metadata 查询、Axum HTTP 服务，以及 SIFT1M 召回率与延迟实验。
-- **RAG 链路**：Dense、BM25、RRF Hybrid、rerank、回答引用与 Search Agent trace。
-- **增量知识库**：稳定 chunk 身份、向量复用和版本化 manifest；main 的展示范围不包含 metadata filter/ACL。
+- **向量检索**：Rust HNSW、精确扫描基线、向量记录查询与 Axum HTTP 服务。
+- **增量知识库**：稳定文档与 chunk 身份、embedding 复用、删除同步和版本清单。
+- **检索与回答**：Dense、BM25、RRF Hybrid、rerank，以及带 chunk 引用和 trace 的回答流程。
+- **实验与验证**：逐题排名、检索指标、计时边界、实际重排后端和输入/源码身份记录。
 
-下面的 Rust 最小演示运行于 `main`。P0/P1 已补齐当前主线的检索证据、评测与增量 KB；
-新增工作区能力、验证与合成 Flat/HNSW 实验见[P1 记录](docs/p1-validation.md)。
-metadata filter/ACL 的练习在 `develop`，参考答案在 `solution`，分支职责见下表。
+## 快速体验
 
-## 最小体验
-
-需要 Git、Rust stable 工具链和 Cargo；首次构建需要下载 Cargo 依赖：
+需要 Git 和 Rust stable 工具链；首次构建需要获取 Cargo 依赖。
 
 ```powershell
 git clone --branch main https://github.com/Gianna-Lynn/Azusa.git
@@ -23,64 +20,47 @@ cd Azusa
 cargo run --locked --example retrieval_demo
 ```
 
-演示内置三篇简短文本和三维预设向量，完成建索引、top-1 搜索、按 ID 取回记录，再通过 ID 映射展示原文。
-无需 API Key、Python、GPU、模型权重或 HTTP 服务，不读取或覆盖现有 RAG 产物。
+演示使用三篇自编短文本与预设向量，完成建索引、top-1 检索和按 ID 取回原文。
+无需 Python、模型、GPU 或 API Key；它验证接口与映射，不衡量自然语言检索质量。
 
-预期标准输出：
+Python 的无模型 BM25 smoke、模型配置和完整运行方式见 [RAG 指南](docs/rag.md)。
 
-```text
-已索引 3 篇示例文本（预设向量，非模型编码）。
-查询：Azusa 的索引重启后会保留吗？
-命中：id=1, score=1.000, chunk_id=demo-1
-原文：Azusa 的 Rust HNSW 索引保存在内存中，进程重启后需要重建。
-已按 ID 取回同一条向量记录与来源信息。
-```
-
-向量与查询的对应关系由示例手工设置；该演示只验证索引接口和 ID 映射，不衡量自然语言理解、RAG 回答质量或检索性能。
-实现见 [`examples/retrieval_demo.rs`](examples/retrieval_demo.rs)。
-
-## 架构与分支
+## 架构
 
 ```text
-documents -> KB manifest -> stable chunks -> embeddings
-                                      |          |
-                                      |          +-> dense / HNSW
-                                      +------------> BM25
-                                                    |
-                                      RRF -> rerank -> evidence
-                                                           |
-                                                     Kaiji gateway
+documents -> stable chunks -> embeddings + manifest
+                                  |          |
+                                  |          +-> BM25
+                                  +-> brute / Rust HNSW
+                                              |
+                                      RRF -> rerank
+                                              |
+                                      evidence -> answer
+                                              |
+                                       citations / trace
 ```
 
-上图描述 main 的展示链路。main 不提供权限过滤，不能作为多租户安全边界。manifest 与 chunk/embedding 产物作为持久事实来源，Rust HNSW 是可重建的内存加速层。
+manifest、chunks 和 embeddings 是持久事实来源；Rust HNSW 是可重建的内存加速层。
+设计取舍见 [架构说明](docs/architecture.md)，上层对接见 [Kaiji 网关](docs/kaiji_integration.md)。
 
-| 分支 | 用途 |
-|---|---|
-| `main` | 对外展示；保留已完成的检索、评测、增量 KB、Gateway 与 Agent，无施工占位 |
-| `develop` | 人的开发与学习；保留已完成成果与 Filter/ACL 四项练习 |
-| `solution` | Agent 参考答案；同步公共改进并补全 Filter/ACL |
+## 实验与验证
 
-Python RAG 的模型、数据和安装要求见 [RAG 指南](rag/RAG_README.md)。默认模型配置使用本机路径和 CUDA，
-运行前需要按自己的环境核对；`kb-sync` 需要可用的本地编码模型，离线契约测试使用向量替身。
+| 范围 | 内容 |
+| --- | --- |
+| [真实中文文本](docs/experiments/duretrieval.md) | 100,001 段落、2,000 查询；BM25、精确向量、HNSW 与插入顺序对照 |
+| [SIFT1M](docs/experiments/sift1m.md) | 历史 100k/1M 参数实验、召回率与查询耗时 |
+| [Flat/HNSW](docs/experiments/flat_hnsw.md) | 小规模合成工作负载下的构建、查询与进程内存成本 |
+| [工程评测](docs/evaluation.md) | 检索指标、Agent 回归、引用失败案例和可追溯报告 |
 
-## 结果与设计记录
+这些是各自日期、版本和配置下的历史结果，不代表当前提交重新测得的成绩。
 
-- [SIFT1M 实验](docs/benchmark.md)：已有 100k 调参与 1M sweep 历史摘要，附配置、规模和复测命令；最小演示不代替性能实验。
-- [Search Agent 回归基线](rag/docs/stage3_agent_eval.md)：15 条工程回归样例，分别记录检索与引用结果。
-- [回答与引用失败案例](rag/docs/badcase_v1.md)：保留错实体、漏答和错误引用，便于追踪限制。
-- [HTTP API](docs/http_api.md)、[Knowledge Base 设计](docs/knowledge_base_v1.md)、[失败矩阵](docs/failure_matrix.md)。
-- [项目详细指南](docs/README.md)。
+## 当前限制
 
-以上评测记录均有各自的时间与适用范围，不代表当前提交重新测得的成绩，也不作为公开 benchmark 排名。
+- Rust 索引在内存中，暂无 WAL 或在线删除；知识库更新后需重启并重建索引。
+- 当前分支不提供 metadata filter/ACL，不构成多租户权限边界。
+- Search Agent 使用规则规划；模型可能漏答或引用错误，引用 ID 合法不等于证据支持结论。
 
-## 当前边界
+使用与接口见 [文档导航](docs/README.md)，完整边界见 [限制与失败模式](docs/limitations.md)。
+`main` 提供可运行版本，`develop` 用于持续开发，`solution` 保存参考实现。
 
-- Rust 服务使用内存索引，暂无 WAL、分布式分片或在线 compaction。
-- 参考实现的 metadata filter 采用 over-fetch 后过滤，可能不足 `k` 条，不等价于原生 filtered ANN。
-- 小型回归集用于检查工程行为；本地小模型仍可能产生错误答案或遗漏引用。
-
-Azusa（あずさ，梓号）的名字来自 JR 东日本中央本线特急列车；Kaiji（かいじ，甲斐路号）是同线的另一班列车。
-
-分支工作流：[分支说明](docs/future_learning_plan.md)。完成并理解的功能从 develop 验收后进入 main；参考答案不整体合入 main。
-
-开发与学习记录：[课程任务书](rag/docs/azusa_v2_assignment.md) · [要求与测试追踪](rag/docs/azusa_v2_traceability.md)。
+Azusa（あずさ，梓号）与 Kaiji（かいじ，甲斐路号）的名字来自 JR 东日本中央本线特急列车。

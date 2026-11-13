@@ -1,6 +1,4 @@
-# Azusa 检索评测闭环（P0-B）
-
-本页说明当前主线已经实现的指标、实验矩阵与产物口径，增量 Knowledge Base 后续已在 P1 完成；Filter/ACL 不属于 main 的交付范围。新代码提供中文函数说明；关键约束由对应负向测试验证。
+# 检索评测与证据验证
 
 ## 无模型小闭环
 
@@ -92,4 +90,21 @@ python -m pytest tests/test_eval_metrics.py tests/test_benchmark_lab.py tests/te
 ```
 
 以上直接检查短排名分母、重复证据、缺失金标、输入被替换、模式失败、实际回退、
-三格式失败保留及拒绝覆盖。需要复验 P0-A 时再按 HTTP 文档构建服务并运行对应测试。
+三格式失败保留及拒绝覆盖。需要复验 HTTP 协议时，按 [HTTP API](http_api.md) 构建服务并运行对应测试。
+
+
+## Agent 回归与引用案例
+
+`rag/data/eval/agent_eval.jsonl` 包含 15 条工程样例：single-hop、rewrite、multi-hop
+各 3 条，证据不足 2 条，引用 badcase 4 条。它用于行为回归，不是开放域能力 benchmark。
+
+2026-07-13 的历史 BM25 基线：类型与 hop 数通过率均为 1.0，平均证据 recall 为
+0.8846；开启本地 Answerer 后，citation precision 为 0.6000、recall 为 0.5667。
+这些数字没有在本次文档整理中重测，不能当作当前版本的新结果。
+
+代表案例来自 2026-06-24 的历史 workflow：题目询问将比分追至 10–7 的达阵球员，
+答案给出 Jonathan Stewart，但引用指向 halftime show 正文。该例说明答案正确不等于
+证据正确。历史逐题原文保存在 develop；代码和测试继续在当前分支维护。
+
+审查时分别检查检索是否命中相关证据、引用是否对齐预期 chunk，以及自然语言答案是否
+完整并受正文支持。LLM 辅助审查不能替代金标、客观指标和人工抽样。

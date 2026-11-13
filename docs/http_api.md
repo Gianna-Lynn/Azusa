@@ -1,4 +1,4 @@
-# Azusa HTTP Demo
+# Rust HTTP API
 
 本文档记录 Azusa 当前的最小 HTTP 闭环：
 
@@ -139,7 +139,7 @@ Python 首次查询前使用的原子装载接口，请求形如：
 - Python HTTP helper 的单次等待上限为 30 秒。大型快照建图可能超时；超时不等于服务端
   已取消建图，可再次检查 health 并重试相同快照，不能因此换语料覆盖旧索引。
 
-## P0-A 回归验证
+## 协议回归验证
 
 从仓库根目录执行 `cargo test --offline --bin azusa_server --test hnsw_api_smoke_test`
 和 `cargo build --offline --bin azusa_server`，然后从 `rag/` 执行：
@@ -150,7 +150,7 @@ python -m pytest tests/test_kaiji_gateway.py tests/test_search_hnsw.py tests/tes
 
 应看到真实 HTTP 六个用例通过，不能把缺少可执行文件时的 skipped 当作验收。
 测试使用预设向量和临时端口，不加载模型、不覆盖 RAG 输出。这里验证协议与证据映射，
-不代表自然语言检索质量、性能或 Azusa v2 未完成 TODO 的验收。
+不代表自然语言检索质量、性能或 其他未交付能力的验收。
 
 ### GET /record/{id}
 
@@ -184,33 +184,9 @@ curl.exe -i "http://127.0.0.1:3000/record/999"
 HTTP/1.1 404 Not Found
 ```
 
-## 一次成功输出示例
-
-```text
-1. GET /health
-Expected: JSON with status=ok and current record_count.
-{"status":"ok","record_count":0}
-
-2. POST /insert
-Expected: HTTP 201 Created. Re-running with the same id returns 409 Conflict.
-HTTP/1.1 201 Created
-
-3. POST /search
-Expected: JSON with results containing id=1.
-{"results":[{"id":1,"score":1.0}]}
-
-4. GET /record/1
-Expected: JSON for record id=1, including metadata.
-{"id":1,"vector":[1.0,0.0,0.0],"metadata":{"doc_id":"demo","chunk_id":"c1","source":"manual","page":1}}
-
-5. GET /record/999
-Expected: HTTP 404 Not Found.
-HTTP/1.1 404 Not Found
-```
-
 ## 当前限制
 
 - 索引只保存在内存中，服务重启后记录会丢失。
 - HNSW 参数暂时固定在服务代码中。
-- 当前接口只覆盖最小 demo 闭环，还没有持久化、批量导入、删除或更新接口。
+- `/index/load` 提供完整快照批量装载；没有索引持久化、在线删除或在线更新接口。
 - Windows PowerShell 下直接传 inline JSON 给 `curl.exe` 容易出现引号问题，推荐使用 `scripts/http_smoke_test.ps1`。

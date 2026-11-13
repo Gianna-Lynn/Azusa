@@ -1,65 +1,31 @@
-# Kaiji 对接说明
+# Kaiji 语义网关
 
-Kaiji 是 Azusa 上层的单 Agent Runtime。Azusa 继续负责检索与证据，不导入 Kaiji，
-也不承担 AgentState、Workflow、Checkpoint、Human-in-the-loop、Trace 或 Eval 编排。
+Kaiji 是上层单 Agent 应用。Azusa 只提供检索与证据，不导入 Kaiji 的状态、工作流或
+checkpoint 模块；网关通过已有检索门面执行查询。
 
-## 分支
+| 接口 | 输入与结果 |
+| --- | --- |
+| POST /search_azusa | query、k、mode；返回 mode 和 hits |
+| GET /chunks/{chunk_id} | 按稳定 chunk_id 返回同一证据正文 |
 
-- `main`：Gateway 请求校验、检索映射、证据读取与 HTTP 路由已实现。
-- `develop`：保留上述实现，继续开发与学习。
-- `solution`：同步 Gateway 改进，额外提供 Filter/ACL 参考答案。
+query 必须是非空字符串，k 为 1 至 20 的整数且不能为 bool，mode 为已支持检索模式。
+hits 保留 chunk_id、text、source、page 和定位元数据；score 在没有真实分数时为 null。
+来源标记可选，不能因缺失或较短而丢失证据。
 
-## 稳定接口
+错误使用 error.code、error.message、error.retryable。参数错误为不可重试 400，
+未知 chunk 为不可重试 404；未预期检索后端失败映射为可重试 503。
 
-```text
-POST /search_azusa
-{"query": "...", "k": 3, "mode": "bm25"}
+## 独立运行
 
-GET /chunks/{chunk_id}
-```
-
-Python 调用面保持为：
-
-```python
-search_azusa(query, k, mode)
-get_chunk_by_id(chunk_id)
-```
-
-搜索响应包含 `hits` 和实际 `mode`。每个 hit 至少包含 `chunk_id`、`text`，并可包含
-`score`、`source`、`page` 和 `metadata`。参数错误、找不到 chunk 和后端失败使用结构化
-HTTP 错误，不把 traceback 暴露给 Kaiji。
-
-## main 展示分支运行方式
+从 rag 目录使用仓库内固定证据集：
 
 ```powershell
-git switch main
-Set-Location rag
-$py = 'D:\Chuo_Data\conda_envs\ChuoEnv\python.exe'
-
-& $py -m pytest tests/test_kaiji_gateway.py
-& $py run_kaiji_gateway.py --port 3010
+python run_kaiji_gateway.py --port 3010 --embedding-path tests/fixtures/kaiji_gateway_embedding.jsonl
 ```
 
-默认加载 `output/artifacts/embedding.jsonl`。`bm25` 不需要 GPU 或 Rust 服务；
-`brute` 需要 embedding model；`hnsw` 还需要根目录的 Rust `azusa_server`；
-`hybrid`/`hybrid_rerank` 继承现有 Azusa pipeline 的要求。
+该 fixture 支持 BM25 的 stromules → 1962 → 按 chunk_id 读取相同正文闭环。
+它验证 HTTP 与证据契约，不代表真实检索质量。默认不指定路径时读取正常 embedding 产物，
+向量和混合模式需要对应的模型与 Rust 服务。
 
-在另一个终端切到 Kaiji 的正确答案分支，运行跨仓库验证：
-
-```powershell
-Set-Location F:\Repositories\Kaiji
-git switch solution/kaiji-v0
-& $py -m pytest tests/test_azusa_live_integration.py
-```
-
-## 已完成的 Gateway 学习记录
-
-`rag/docs/kaiji_gateway_assignment.md` 保留以下已实现任务及跨仓库验收入口：
-
-1. 请求参数与 mode 校验；
-2. `search_azusa(query, k, mode)` 对现有检索门面的调用与响应映射；
-3. `get_chunk_by_id(chunk_id)` 的稳定查找和 404；
-4. HTTP JSON 路由、状态码和结构化错误；
-5. Kaiji 真实 HTTP 集成回归。
-
-所有实现必须保持有界输入、明确失败、可离线测试，并且不得复制 Kaiji Runtime 逻辑。
+`python -m pytest tests/test_kaiji_gateway.py` 覆盖输入、映射、缺失来源、后端失败和
+真实本地 HTTP 路由。上层跨仓库集成测试由 Kaiji 维护；其历史联调不能替代本次执行证据。

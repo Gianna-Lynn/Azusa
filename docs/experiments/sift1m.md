@@ -1,8 +1,6 @@
-# Benchmark Notes
+# SIFT1M 历史向量近邻实验
 
-本文档记录 5.1-5.5 阶段 benchmark 的可执行命令、已有结果位置和当前限制。
-
-本阶段**不重跑 1M 全量 SIFT1M**。全量结果引用已有记录，今天只保留轻量复测命令和文档化说明。
+以下结果来自 2026 年 4—5 月的历史记录，本次仅整理文档，没有重新执行性能实验。
 
 ## 轻量 Smoke Benchmark
 
@@ -26,7 +24,7 @@ target/benchmark/sift1m.csv
 target/benchmark/sift1m.md
 ```
 
-本阶段复测记录：
+2026-05-06 历史 smoke：
 
 ```text
 date: 2026-05-06
@@ -48,7 +46,7 @@ output: target/benchmark/sift1m.md
 cargo run --release --bin sift1m_benchmark -- --mode hnsw --base-limit 100000 --query-limit 100 --ks 5 --ef-search 60,100,300 --m 4 --ef-construction 80
 ```
 
-全量 1M 命令只作为记录，不在本阶段运行：
+全量 1M 的复现命令（建图耗时较长，按需运行）：
 
 ```powershell
 cargo run --release --bin sift1m_benchmark -- --mode hnsw --base-limits 1000000 --ks 1,5,10 --ef-search 60,100,300 --query-limit 100 --m 8,16,32 --ef-construction 100,200
@@ -61,7 +59,7 @@ cargo run --release --bin sift1m_benchmark -- --mode hnsw --base-limits 1000000 
 记录位置：
 
 ```text
-docs/archive/perf_logs.md
+develop 分支的 docs/archive/perf_logs.md
 ```
 
 摘要：
@@ -82,7 +80,7 @@ docs/archive/perf_logs.md
 记录位置：
 
 ```text
-docs/archive/perf_logs.md
+develop 分支的 docs/archive/perf_logs.md
 target/benchmark/sweeps/sift1m_hnsw_sweep_1m_20260425_195847/
 ```
 
@@ -97,11 +95,13 @@ target/benchmark/sweeps/sift1m_hnsw_sweep_1m_20260425_195847/
 说明：
 
 - `m32_efc200` 在启动后受服务器硬盘挂载故障影响，没有完整结果。
-- 这组全量数据本阶段只引用，不重跑。
+- 这组全量数据按历史记录引用，不代表当前版本重测。
 
 ## 当前限制
 
 - SIFT1M 原始数据位于 `data/sift1m/sift/`，不属于仓库内可移植的小样本数据。
 - benchmark 输出写入 `target/benchmark/`，该目录不提交。
 - 轻量 smoke 只能证明流程可运行，不能代表最终召回率或性能。
-- 全量 1M benchmark 建图耗时较长，且依赖本机/服务器资源，本阶段暂不执行。
+- 全量 1M benchmark 建图耗时较长，且依赖本机/服务器资源，需具备对应资源后单独执行。
+
+历史完整参数日志保存在 develop；摘要保留相关配置、日期及失败配置说明。原始数据和大型产物不随仓库分发。

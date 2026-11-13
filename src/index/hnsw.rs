@@ -23,16 +23,17 @@ pub use hnsw_workspace::SearchLayerWorkspace;
 
 const MY_SEED: u64 = 42;
 
+// HnswIndex: HNSW索引的核心结构体，
 #[derive(Debug)]
-pub struct HnswIndex {
-    pub(crate) nodes: Vec<HnswNode>, // nodes: 图节点,用index访问
-    pub(crate) records: HashMap<Id, VectorRecord>, //records: 用id访问, 从id映射到原始记录, 用于查询VectorRecord的(id, vector, metadata)等信息
-    pub(crate) entry_node_index: Option<usize>,
-    pub(crate) index_max_level: usize, // index_max_level: 当前图的最大层数, 从0开始计数
-    metric: Metric,                    // metric: 度量类型, 指示向量之间相似度/距离的计算方式
-    pub(crate) id_to_index: HashMap<Id, usize>, // id_to_index: 从外部Id到内部节点索引的映射
-    rng: StdRng,                       // rng: 随机数生成器, 用于层级采样和随机化操作
-    level_sample_probability: f64,     // level_sample_probability: 采样新节点层级时使用的概率参数
-    pub(crate) timing: InsertTimings,  // timing: 插入操作的计时统计
-    workspace: SearchLayerWorkspace,   // workspace: 搜索层的临时工作区，复用以减少分配
+pub struct HnswIndex {                             
+    pub(crate) nodes: Vec<HnswNode>,               // nodes: 图节点,用index访问
+    pub(crate) records: HashMap<Id, VectorRecord>, // records: 用id访问, 从id映射到原始记录, 用于查询VectorRecord的(id, vector, metadata)等信息
+    pub(crate) entry_node_index: Option<usize>,    // entry_node_index: 图的入口节点索引, 用于搜索的起点, 可能为空表示图为空
+    pub(crate) index_max_level: usize,             // index_max_level: 当前图的最大层数, 从0开始计数
+    metric: Metric,                                // metric: 度量类型, 指示向量之间相似度/距离的计算方式
+    pub(crate) id_to_index: HashMap<Id, usize>,    // id_to_index: 从外部Id到内部节点索引的映射
+    rng: StdRng,                                   // rng: 随机数生成器, 用于层级采样和随机化操作
+    level_sample_probability: f64,                 // level_sample_probability: 采样新节点层级时使用的概率参数
+    pub(crate) timing: InsertTimings,              // timing: 插入操作的计时统计
+    workspace: SearchLayerWorkspace,               // workspace: 搜索层的临时工作区，复用以减少分配
 }

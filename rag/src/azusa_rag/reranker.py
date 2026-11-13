@@ -1,8 +1,9 @@
 """
-提供最小 reranker 能力:
-1. 延迟加载 BGE reranker
-2. 对 (query, passage) 对打分
-3. 在加载或推理失败时把异常抛给调用方, 由 search.py 决定是否 fallback
+提供最小 reranker 能力 (cross-encoder 重排):
+1. 延迟加载 BGE reranker (tokenizer + sequence classification 模型),
+   解析设备并在模块级缓存复用, 避免重复初始化.
+2. 对 (query, passage) 对按 batch 打分, 分数越高表示越相关.
+3. 在加载或推理失败时把异常抛给调用方, 由 search.py 决定是否 fallback.
 """
 from __future__ import annotations
 
@@ -32,8 +33,18 @@ _MODEL_DEVICE = None
 
 def _resolve_device(requested_device: str) -> str:
     """
-    按配置选择 reranker 设备.
-    如果请求 cuda 但当前机器不可用, 自动回退到 cpu.
+    按配置解析 reranker 实际使用的设备.
+
+    Args:
+        requested_device: 配置中声明的目标设备, 例如 "cuda" 或 "cpu".
+
+    Returns:
+        解析后的设备字符串. 请求 cuda 但当前机器不可用时回退为 "cpu"
+        并发出 UserWarning; 其余情况原样返回.
+
+    Note:
+        解析结果同时决定模型加载时的 dtype: cuda 上使用 float16 节省显存,
+        cpu 上使用 float32 保证兼容性.
     """
     if requested_device.startswith("cuda"):
         if torch.cuda.is_available():
@@ -47,8 +58,19 @@ def _resolve_device(requested_device: str) -> str:
 
 def _load_reranker_components() -> tuple:
     """
-    延迟加载 reranker 的 tokenizer / model / device.
-    这样搜索过程中可以复用同一份模型实例, 不必每次重新初始化.
+    延迟加载 reranker 的 tokenizer / model / device, 并缓存复用.
+
+    首次调用时按 RERANK_MODEL_NAME 从本地路径加载 tokenizer 和
+    sequence classification 模型, 解析设备后把模型搬到目标设备并置为
+    eval 模式; 三者缓存在模块级变量中, 后续调用直接复用, 不必每次重新初始化.
+
+    Returns:
+        (tokenizer, model, model_device) 三元组.
+
+    Raises:
+        RuntimeError: reranker 被配置禁用 (RERANK_ENABLED 为 False),
+            或 transformers 未安装.
+        OSError 等加载异常: 模型路径不存在或加载失败时原样向上抛出.
     """
     global _TOKENIZER, _MODEL, _MODEL_DEVICE
 
@@ -86,7 +108,23 @@ def _load_reranker_components() -> tuple:
 def score_query_passage_pairs(query: str, passage_list: list[str]) -> list[float]:
     """
     对一批 (query, passage) 对计算 reranker 相关性分数.
-    返回值与 passage_list 一一对应, 分数越高表示越相关.
+
+    把同一 query 与 passage_list 中每个 passage 组成 (query, passage) 对,
+    按 batch 送入 BGE reranker, 返回与 passage_list 一一对应的相关性分数;
+    分数越高表示 query 与 passage 越相关.
+
+    Args:
+        query: 检索查询文本, 与每个 passage 分别配对打分.
+        passage_list: 候选段落文本列表, 允许为空.
+
+    Returns:
+        与 passage_list 一一对应的 float 分数列表; 空输入返回空列表.
+
+    Note:
+        - 按 RERANK_BATCH_SIZE 分批推理, 批内统一 padding 并截断到
+          RERANK_MAX_LENGTH, 输入张量自动搬到模型所在设备.
+        - 分数是模型的原始 logits; 推理在 torch.no_grad 下进行, 不产生梯度.
+        - 模型加载或推理失败时异常向上抛出, 由 search.py 决定是否 fallback.
     """
     if not passage_list:
         return []
@@ -115,6 +153,11 @@ def score_query_passage_pairs(query: str, passage_list: list[str]) -> list[float
 
             # SequenceClassification 模型输出 logits;
             # 这里把它拉平成一维分数列表, 保持和输入 passage 顺序一致.
-            logits = model(**batch_dict, return_dict=True).logits.view(-1) # 用 **把字典展开成函数参数传参进去. 用return_dict告诉模型不要返回普通tuple, 而是返回一个带名字的结果对象, 方便取.logits; logits是模型的原始输出分数, 分数越大, 一般意味着query和passage越相关; .view(-1)表示把
-            score_list.extend(logits.float().cpu().tolist()) # extend(...)把这一批分数逐个追加到总列表中, 而不是作为嵌套列表塞进去.
+            # 将输入字典展开为模型参数，并以带字段名的结果对象返回输出。
+            # logits 是模型的原始分数，通常分数越高表示 query 与 passage 越相关。
+            # view(-1) 将 logits 展平成一维，便于按 passage 顺序收集分数。
+            logits = model(**batch_dict, return_dict=True).logits.view(-1)
+
+            # 转为 CPU 上的 Python 浮点数后，逐个追加到结果列表，避免生成嵌套列表。
+            score_list.extend(logits.float().cpu().tolist())
     return score_list

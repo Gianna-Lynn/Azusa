@@ -1,4 +1,4 @@
-"""Typed metadata filtering and a minimal deny-by-default ACL policy."""
+"""提供严格元数据过滤协议和最小 deny-by-default ACL；仅答案分支完整实现。"""
 
 from __future__ import annotations
 
@@ -19,13 +19,16 @@ class MetadataFilter:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any] | None) -> "MetadataFilter | None":
+        """解析可选 JSON 对象；未知字段、非法标量和非字符串列表一律拒绝。"""
         if payload is None:
             return None
+        if not isinstance(payload, dict):
+            raise ValueError("Metadata filter must be a JSON object")
         allowed = {"tenant_id", "department", "document_type", "language", "visibility", "tags_any"}
-        unknown = sorted(set(payload) - allowed)
+        unknown = sorted(str(key) for key in set(payload) - allowed)
         if unknown:
             raise ValueError(f"Unknown metadata filter fields: {unknown}")
-        tags = payload.get("tags_any") or []
+        tags = payload.get("tags_any", [])
         if not isinstance(tags, list) or not all(isinstance(item, str) for item in tags):
             raise ValueError("tags_any must be a list of strings")
         scalar = {key: payload.get(key) for key in allowed - {"tags_any"}}
@@ -42,12 +45,15 @@ class AccessContext:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any] | None) -> "AccessContext | None":
+        """区分未启用 ACL 的 None 与显式上下文；不将假值转换成合法字段。"""
         if payload is None:
             return None
-        unknown = sorted(set(payload) - {"tenant_id", "departments", "allow_private"})
+        if not isinstance(payload, dict):
+            raise ValueError("Access context must be a JSON object")
+        unknown = sorted(str(key) for key in set(payload) - {"tenant_id", "departments", "allow_private"})
         if unknown:
             raise ValueError(f"Unknown access context fields: {unknown}")
-        departments = payload.get("departments") or []
+        departments = payload.get("departments", [])
         allow_private = payload.get("allow_private", False)
         if not isinstance(departments, list) or not all(isinstance(item, str) for item in departments):
             raise ValueError("departments must be a list of strings")
@@ -60,6 +66,7 @@ class AccessContext:
 
 
 def metadata_matches(record: EmbeddingRecord, metadata_filter: MetadataFilter | None) -> bool:
+    """标量条件全部满足，tags_any 至少一个交集；无 filter 时全部匹配。"""
     if metadata_filter is None:
         return True
     metadata = record.metadata

@@ -116,6 +116,32 @@ def test_service_maps_search_records_to_stable_hits(service) -> None:
     }
 
 
+@pytest.mark.parametrize("mode", ["brute", "hnsw", "bm25", "hybrid", "hybrid_rerank"])
+@pytest.mark.parametrize("sources", [None, [], [{"source": "dense"}]])
+def test_optional_or_short_sources_never_drop_evidence(mode, sources) -> None:
+    """后端返回两条命中时，可选来源标记不得改变命中数量、顺序或回读正文。"""
+    records = [make_record("a", "first"), make_record("b", "second")]
+    gateway = KaijiGatewayService(records, search_function=lambda *args: (records, sources))
+    hits = gateway.search_azusa("query", 2, mode)["hits"]
+    assert [hit["chunk_id"] for hit in hits] == ["a", "b"]
+    assert [hit["text"] for hit in hits] == ["first", "second"]
+    assert [hit["metadata"]["retrieval_source"] for hit in hits] == [
+        "dense" if sources else None, None,
+    ]
+    for hit in hits:
+        assert gateway.get_chunk_by_id(hit["chunk_id"])["text"] == hit["text"]
+
+
+@pytest.mark.parametrize("mode", [None, [], {}, True, 1])
+def test_invalid_mode_type_is_a_non_retryable_request_error(mode) -> None:
+    """错误类型不能在集合查询中泄露为内部异常或被隐式接受。"""
+    with pytest.raises(GatewayError) as caught:
+        validate_search_request("query", 1, mode)
+    assert caught.value.code == "invalid_mode"
+    assert caught.value.status == 400
+    assert caught.value.retryable is False
+
+
 def test_service_get_chunk_and_structured_not_found(service) -> None:
     assert service.get_chunk_by_id("azusa-001") == {
         "chunk_id": "azusa-001",
@@ -144,7 +170,7 @@ def test_service_rejects_invalid_chunk_id(service, chunk_id) -> None:
 
 
 def test_tracked_fixture_supports_reproducible_bm25_contract() -> None:
-    """仓库内小型 fixture 必须独立支撑 TODO12 的 stromules 正向闭环。"""
+    """仓库内小型 fixture 必须独立支撑 AZUSA-GW-05（Kaiji TODO 12）的 stromules 正向闭环。"""
 
     fixture_service = KaijiGatewayService(load_embedding_records(FIXTURE_PATH))
 

@@ -4,7 +4,7 @@
 
 - `raw txt -> chunks.jsonl -> embedding.jsonl`
 - `brute / hnsw / bm25 / hybrid / hybrid_rerank` 检索
-- 最小检索评测：`Hit@k / Recall@k / MRR`
+- 检索评测：`Hit@k / Recall@k / MRR / nDCG@k` 与 nearest-rank P50/P95
 - 最小 `answer + citation` 和 Search Agent v0
 
 ## 环境
@@ -28,6 +28,10 @@ cargo run --bin azusa_server
 - answerer: `D:\Chuo_Data\Models\Qwen2.5-0.5B-Instruct`
 
 ## 常用命令
+
+无需模型或服务的当前主线闭环：`python run.py benchmark-lab --smoke --top-k 1,3`。
+仅使用仓库合成小语料验证 BM25 协议，不代表真实质量成绩。指标、源码/数据哈希、
+实际重排回退和三格式报告说明见 [检索评测闭环](../docs/retrieval_evaluation.md)。
 
 统一入口是 `run.py`：
 
@@ -54,7 +58,8 @@ python run.py import-hf-eval --length 20
 
 - `--query-text "..."`：直接传 query。
 - `--query-file path\to\query.txt`：从文件读 query。
-- `--keep-run-copy`：额外保留命名副本；默认只覆盖 `latest/`。
+- `--keep-run-copy`：Search/Agent 等旧入口沿用原输出策略；普通 `eval` 与
+  `benchmark-lab` 默认创建独立实验目录，不覆盖 `latest/`。
 
 ## Search Agent v0
 

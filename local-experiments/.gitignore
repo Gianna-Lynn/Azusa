@@ -1,0 +1,3 @@
+# Raw server artifacts stay local; the reviewed summary lives under docs/.
+*
+!.gitignore

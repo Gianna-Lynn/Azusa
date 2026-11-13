@@ -1,7 +1,9 @@
 # Azusa v2 分级课程任务书
 
-参考答案：`solution/azusa-v2`  
-课程主线：`main`
+参考答案：`solution`
+课程主线：`develop`；`main` 仅展示已完成能力，不包含 Filter/ACL 练习入口。
+
+L1a、L1b、L1e、L2a、L2b、L2c、L3a、L3b 已完成；剩余 L1c、L1d、L2d、L2e 仅在 develop 练习，solution 提供实现。下表保留完整学习路线。
 
 ## 学习目标与非目标
 
@@ -33,11 +35,39 @@ $py = 'D:\Chuo_Data\conda_envs\ChuoEnv\python.exe'
 & $py -m pytest <上表测试> -q -p no:cacheprovider
 ```
 
-## 分级边界
+## L1：边界实现
 
-- L1 提供文件位置、函数签名、数据模型和精确输入输出协议，训练局部边界实现。
-- L2 保留公开模型与黑盒契约，训练 ingestion、增量规划、过滤和 artifact 复用的职责组织。
-- L3 只规定实验矩阵、失败语义、交付产物与验收边界，训练一次完整实验工程交付。
+L1 已提供文件位置、函数签名、数据模型和精确输入输出契约。严格类型校验不能依赖 Python
+真值转换：`bool` 不得冒充整数，未知字段不得静默忽略，跨进程身份不得使用 `hash()`。
 
-答案分支应让所有测试通过；课程分支未完成时，每个窄测试必须精确落到对应 TODO。
+完成 L1 后，loader/filter/eval 的局部函数应独立变绿；后续 L2/L3 的
+`NotImplementedError` 不得遮挡当前反馈。
 
+## L2：职责组织
+
+L2 保留公开模型和黑盒契约，由人组织内部数据流。必须维持：
+
+1. 相同内容 chunk 在无关位置变化后保持 `chunk_id`；重复内容用 occurrence 消歧；
+2. embedding 只在 `chunk_id + content_hash` 均匹配时复用；
+3. 删除文档后旧 chunk 不再进入当前 artifacts；
+4. metadata filter 与 ACL 是两个独立 predicate；未知 visibility fail closed；
+5. 三份 artifact 单文件原子写入，不宣称多文件事务。
+
+## L3：实验工程交付
+
+L3 只规定产物与验收边界。实验矩阵必须覆盖多个预构建 chunk variant、多个检索 mode 与
+多个 top-k；每个失败单元格都要进入报告，命令最终以非零状态退出，不得只展示成功格。
+
+必须交付：
+
+- `benchmark.json`：完整机器可读 report；
+- `benchmark.csv`：固定字段、UTF-8 BOM；
+- `benchmark.md`：指标表、P50/P95 口径、失败单元格；
+- Hit@k、Recall@k、MRR、nDCG@k、P50/P95；
+- 明确说明跨机器 latency 不可直接比较。
+
+## 完成边界
+
+课程完成不能只看一次全量测试。必须同时确认：每个窄测试按顺序变绿、全量测试通过、
+`python run.py kb-sync --help` 与 `python run.py benchmark-lab --help` 可用、BM25 smoke 生成
+三份报告，并能解释 `restart-and-rebuild-in-memory-hnsw` 的限制。

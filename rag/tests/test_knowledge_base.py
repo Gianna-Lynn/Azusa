@@ -18,7 +18,7 @@ from azusa_rag.schemas import ChunkRecord, DocumentRecord
 
 
 def make_document(text: str, document_id: str = "policy-fixed") -> DocumentRecord:
-    # L2 窄测试不能被 L1a 遮挡，因此 fixture 自己生成已知合法哈希。
+    # L2 窄测试不能被尚未完成的 L1a 遮挡，因此 fixture 自己生成已知合法哈希。
     normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip()
     digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
     return DocumentRecord(

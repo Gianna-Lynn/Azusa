@@ -36,8 +36,9 @@ def main() -> None:
     service = KaijiGatewayService(load_embedding_records(args.embedding_path))
     server = build_http_server(args.host, args.port, service=service)
     print(
-        f"Azusa Kaiji 网关正在监听 http://{args.host}:{args.port}，"
-        f"已加载 {len(server.service._records)} 条记录：{args.embedding_path}"
+        f"Azusa Kaiji 网关正在监听 http://{args.host}:{server.server_address[1]}，"
+        f"已加载 {len(server.service._records)} 条记录：{args.embedding_path}",
+        flush=True,
     )
     try:
         server.serve_forever()

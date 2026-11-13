@@ -4,6 +4,10 @@
 
 Azusa 是一个基于 HNSW 的向量检索 / RAG 实验项目。
 
+分支约定：`main` 对外展示，`develop` 承载人的开发与练习，`solution` 保存 Agent 参考答案。
+Filter/ACL 不属于 main 的交付能力；四项练习在 develop，完整参考实现在 solution。P0/P1 已在当前主线实现检索证据修复、Benchmark Lab 和增量 Knowledge Base；
+产物版本、实验与验证范围见 [P1 记录](p1-validation.md)。
+
 当前主线分两层：
 
 - Rust HNSW：内存索引、top-k 检索、metadata 查询、HTTP demo 服务。
@@ -52,7 +56,7 @@ cargo run --release --bin sift1m_benchmark -- --mode hnsw --base-limit 1000 --qu
 - 15 题 Agent Eval 覆盖 single-hop、query rewrite、multi-hop、证据不足和历史 citation badcase。
 - `rag/run.py` 统一调度 chunk、embed、search、eval、workflow、agent 和 agent-eval。
 - Knowledge Base v1 支持多格式文本层、内容寻址 chunk、manifest、增量 embedding 复用和删除语义。
-- Metadata Filter / 最小 ACL 支持 tenant、department、visibility 与 tags，并显式记录 post-filter 风险。
+- 仅 solution：Metadata Filter / 最小 ACL 支持 tenant、department、visibility 与 tags；develop 保留对应练习。
 - Benchmark Lab 统一输出 Hit/Recall/MRR/nDCG 与 P50/P95 latency，支持多 artifact 实验矩阵。
 
 ## 文档入口
@@ -71,7 +75,7 @@ cargo run --release --bin sift1m_benchmark -- --mode hnsw --base-limit 1000 --qu
 
 - HTTP 服务仍是内存索引，服务重启后记录会丢失。
 - Rust HNSW 仍是内存加速层；更新/删除通过持久 artifact 同步后重启并确定性重建，暂无 WAL 或在线 compaction。
-- Metadata filter 当前使用 over-fetch 后过滤，不等价于原生 filtered ANN。
+- main 不提供 metadata filter/ACL；solution 的 over-fetch 后过滤不等价于原生 filtered ANN。
 - SIFT1M 原始数据不随仓库提交，benchmark 依赖本机或服务器上的 `data/sift1m/sift/`。
 - Query classification 和 multi-hop split 当前仍是确定性规则版，不是模型规划器。
 - 本地 0.5B Answerer 仍可能漏答、错实体或漏 citation；系统会保留结构化 trace 和不确定性供人工复核。

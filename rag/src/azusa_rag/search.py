@@ -1,14 +1,20 @@
 """
-这个文件现在是检索层的“门面”。
+检索层对外的统一门面。
 
-前面把原来那个很长的 search.py 拆成了多个子模块：
-1. search_common.py：公共 helper
-2. search_hnsw.py：和 Rust azusa_server 交互
-3. search_sparse.py：BM25 sparse + rerank
-4. search_hybrid.py：hybrid / hybrid_rerank 编排
+单次检索的完整流程（mode 分派、过滤、来源标记、trace）都从
+``search_records_with_sources`` 进入；CLI 入口（run_search.py / run_eval.py）、
+Agent（agent.py）和 Kaiji gateway（kaiji_gateway.py）统一通过本文件调用，
+不直接依赖下面的具体后端模块。
 
-但对外部调用者来说，仍然优先 import 这个文件，避免 run_search.py / run_eval.py
-以及其他调用点都跟着一起改。
+支持的模式以 ``modes.SEARCH_MODES`` 为准：
+brute（本地暴力 dense）、hnsw（Rust HNSW 服务）、bm25（sparse）、
+hybrid（dense + sparse 经 RRF 融合）、hybrid_rerank（hybrid 候选 + rerank）。
+
+后端细节由子模块承担：
+- search_common.py：query 向量化、内积、下标转记录等公共 helper
+- search_hnsw.py：和 Rust azusa_server 交互
+- search_sparse.py：BM25 sparse 检索与 rerank 调度
+- search_hybrid.py：hybrid / hybrid_rerank 编排
 """
 
 from __future__ import annotations
@@ -24,7 +30,7 @@ from .search_common import (
     dot_product,
     embed_query,
     get_query,
-    ids_to_records,
+    indices_to_records,
 )
 from .search_hnsw import ensure_hnsw_index_loaded, search_core_hnsw
 from .search_hybrid import search_hybrid_rerank_with_sources, search_hybrid_with_sources
@@ -38,16 +44,16 @@ def search_core_brute(
 ) -> list[int]:
     """
     暴力搜索内核。
-    接受 query 向量和全部候选向量，返回最优的 top-k 个 id。
+    接受 query 向量和全部候选向量，返回得分最高的 top-k 个下标。
     """
-    score_id_list = []
-    for record_id, vector in search_vecs:
+    score_index_list = []
+    for record_index, vector in search_vecs:
         score = dot_product(query_vec, vector)
-        score_id_list.append((score, record_id))
+        score_index_list.append((score, record_index))
 
-    # sort 包含 tie-break 逻辑：分数相同的时候让 id 小的在前面，避免结果抖动。
-    score_id_list.sort(key=lambda item: (-item[0], item[1]))
-    return [record_id for _, record_id in score_id_list[:top_k]]
+    # sort 包含 tie-break 逻辑：分数相同的时候让下标小的在前面，避免结果抖动。
+    score_index_list.sort(key=lambda item: (-item[0], item[1]))
+    return [record_index for _, record_index in score_index_list[:top_k]]
 
 
 def search_records_with_sources(
@@ -57,24 +63,57 @@ def search_records_with_sources(
     mode: str = "brute",
     metadata_filter: MetadataFilter | None = None,
     access_context: AccessContext | None = None,
-    filter_overfetch: int = 5,
+    filter_overfetch: int = 5,  # 有过滤条件时，先召回 top_k * filter_overfetch 这么多个候选，再应用过滤.
     trace: dict | None = None,
 ) -> tuple[list[EmbeddingRecord], list[dict] | None]:
     """
-    完整的搜索流程。
-    按 mode 选择 brute / hnsw / hybrid / hybrid_rerank / bm25，
-    最终返回 EmbeddingRecord 列表，以及可选的来源标记。
+    单条 query 的完整检索流程。
+
+    按 mode 选择检索后端：
+
+    - ``brute``：本地暴力 dense，作为 baseline
+    - ``hnsw``：经 HTTP 调用 Rust HNSW 服务
+    - ``bm25``：sparse 关键词检索
+    - ``hybrid``：dense + sparse 分别召回后经 RRF 融合
+    - ``hybrid_rerank``：hybrid 扩大候选后再用 reranker 重排
+
+    指定 metadata_filter 或 access_context 时采用 over-fetch-then-filter：
+    先按 ``top_k * filter_overfetch`` 扩大召回，再逐条过滤，
+    因此最终结果可能少于请求的 ``top_k``。
+
+    # Arguments
+    - `query`: 查询文本；
+    - `embedding_records`: 全部可检索记录；
+    - `top_k`: 期望返回的结果数量；
+    - `mode`: 检索模式，合法值见 ``modes.SEARCH_MODES``；
+    - `metadata_filter`: 可选元数据过滤条件；
+    - `access_context`: 可选访问控制上下文；
+    - `filter_overfetch`: 有过滤条件时的召回放大倍数，默认 5；
+    - `trace`: 可选字典，用于记录实际后端、各阶段耗时与候选数量。
+
+    # Returns
+    ``(result_records, source_map)``：
+    过滤与截断后的 EmbeddingRecord 列表，以及对应的来源标记；
+    brute / hnsw 模式下 source_map 为 ``None``，其余模式为
+    ``{"id": 记录下标, "source": 后端说明}`` 字典的列表。
     """
     total_started = perf_counter()
     if trace is not None:
         trace.update({"mode": mode, "requested_top_k": top_k, "corpus_count": len(embedding_records)})
+    # 只要指定了 metadata 过滤或访问权限上下文，后面就需要执行“先召回、再过滤”.
     filtered_request = metadata_filter is not None or access_context is not None
+    # 保存调用方真正想要的结果数量；前面的 top_k 可能会临时扩大.
     requested_top_k = top_k
     if filtered_request:
+        # over-fetch 倍数必须至少为 1，否则无法保证至少召回原本请求的数量.
         if filter_overfetch < 1:
             raise ValueError("filter_overfetch must be at least 1")
+        # 先扩大候选集，给后续过滤留下余量；同时不能超过当前语料总量.
         top_k = min(len(embedding_records), max(top_k, top_k * filter_overfetch))
 
+
+
+    # 下面根据 mode 选择具体的检索后端，并统一得到候选记录下标和来源信息.
     if mode == "brute":
         # brute 模式才需要 query vector 和全部候选向量。
         started = perf_counter()
@@ -91,15 +130,23 @@ def search_records_with_sources(
     elif mode == "hnsw":
         # hnsw 需要先确保 azusa_server 里已经装好当前这批 embedding。
         started = perf_counter()
+        # 1. query 编码为 query vector
         query_vec = embed_query(query=query)
+        
         if trace is not None:
             trace["embedding_ms"] = (perf_counter() - started) * 1000
+        
         started = perf_counter()
-        ensure_hnsw_index_loaded(embedding_records)
-        top_k_list = search_core_hnsw(query_vec=query_vec, top_k=top_k)
+        # 2. 确保 azusa_server 已经加载了当前 embedding_records 的 HNSW 索引，并返回索引指纹.
+        fingerprint = ensure_hnsw_index_loaded(embedding_records)
+        # 3. 调用 azusa_server 的 HNSW 搜索接口，返回 top_k_list.
+        top_k_list = search_core_hnsw(query_vec=query_vec, top_k=top_k, dataset_fingerprint=fingerprint)
+        
         if trace is not None:
             trace["dense_ms"] = (perf_counter() - started) * 1000
             trace["dense_candidate_count"] = len(top_k_list)
+        
+        # 4. hnsw 模式下，source_map 目前没有来源标记，返回 None.
         source_map = None
     elif mode == "hybrid":
         top_k_list, source_map = search_hybrid_with_sources(query, embedding_records, top_k, trace=trace)
@@ -112,11 +159,14 @@ def search_records_with_sources(
         if trace is not None:
             trace["sparse_ms"] = (perf_counter() - started) * 1000
             trace["sparse_candidate_count"] = len(top_k_list)
-        source_map = [{"id": record_id, "source": "bm25 sparse"} for record_id in top_k_list]
+        source_map = [{"id": record_index, "source": "bm25 sparse"} for record_index in top_k_list]
+        # 搜索数据流研究:
+        # top_k_list = [1, 3] , 
+        # source_map = [ {"id": 1, "source": "bm25 sparse"}, {"id": 3, "source": "bm25 sparse"}, ]
     else:
         raise ValueError("Search mode must be bm25, brute, hnsw, hybrid,or hybrid_rerank")
 
-    result_records = ids_to_records(top_k_list, embedding_records)
+    result_records = indices_to_records(top_k_list, embedding_records) # 搜索数据流研究 result_records = [ record_B,  record_D, ]
     if filtered_request:
         if trace is not None:
             trace["pre_filter_count"] = len(result_records)
@@ -144,22 +194,32 @@ def search(
     embedding_records: list[EmbeddingRecord],
     top_k: int,
     mode: str = "brute",
+    *,
+    trace: dict | None = None,
 ) -> list[EmbeddingRecord]:
     """
     对外保留的最小门面。
     如果调用方只关心最终命中的记录，而不关心每条记录来自 dense / sparse 哪一路，
     就继续用这个函数。
+    评测可传入独立 trace 字典，保存实际后端与耗时，不改变返回值结构。
     """
     result_records, _ = search_records_with_sources(
         query=query,
         embedding_records=embedding_records,
         top_k=top_k,
         mode=mode,
+        trace=trace,
     )
     return result_records
 
 
 def main() -> None:
+    """
+    历史遗留的最简演示入口：用默认 query 跑一次 brute 检索并打印命中文本。
+
+    正式入口是 ``python run.py search``（经 run_search.py）；这里只保留给
+    直接 ``python -m azusa_rag.search`` 快速验证的场景。
+    """
     query_str = get_query()
     embedding_records_list = load_embedding_records(EMBEDDING_OUTPUT_PATH)
     result_list = search(

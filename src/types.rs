@@ -15,7 +15,7 @@ pub type Vector = Vec<f32>;
 /// Metadata: 记录的元信息, 比如来源文档、页码等. 目前是可选的, 可以不提供.
 /// serde::Serialize和serde::Deserialize: 这两个trait允许Metadata结构体被序列化和反序列化, 方便存储和传输.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
-pub struct Metadata {
+pub struct Metadata {   // 属于下面的VectorRecord的一部分.
     pub doc_id: Option<String>,
     pub chunk_id: Option<String>,
     pub source: Option<String>,

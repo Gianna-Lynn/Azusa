@@ -12,7 +12,7 @@ du_retrieval_eval.jsonl
         "page": None,
         "text": "猫喜欢晒太阳."
     }
-    
+
 
     eval_records的每一行是一条 query 的金标答案. 形如:
     {
@@ -106,10 +106,10 @@ def build_eval_records(corpus, queries, qrels, notes_text=None):
         "relevant_chunk_ids": ["p1", "p3"]
     }
     """
-    
+
     # 从corpus 提取一个 corpus_id 集合
     corpus_ids = {passage["id"] for passage in corpus}
-    
+
     query_id_to_text = { # 声明一个字典, 键是query中的id, 值是query中的text
         query["id"]: query["text"]
         for query in queries
@@ -124,7 +124,7 @@ def build_eval_records(corpus, queries, qrels, notes_text=None):
         # 如果不满足score > 0, 认为score值非法.
         if qrel["score"] <= 0:
             continue
-        
+
         query_id = qrel["qid"]
         passage_id = qrel["pid"]
 
@@ -139,9 +139,9 @@ def build_eval_records(corpus, queries, qrels, notes_text=None):
         if passage_id not in corpus_ids:
             continue
 
-        if query_id not in query_id_to_relevant_ids: 
+        if query_id not in query_id_to_relevant_ids:
             query_id_to_relevant_ids[query_id] = []
-        
+
         if passage_id not in query_id_to_relevant_ids[query_id]: # 避免同一个passage_id被重复添加, 得到形如 金标 = ["p1", "p1", "p3"]  的错误结果.
             query_id_to_relevant_ids[query_id].append(passage_id)
 
@@ -173,7 +173,7 @@ def build_passage_records(corpus):
         "page": None,
         "text": "猫喜欢晒太阳."
     }
-    
+
     eval_records和passage_records的连接点:
     passage_records.chunk_id == eval_records.relevant_chunk_ids 里的那些 pid
     """
@@ -215,7 +215,7 @@ def main():
     corpus = data["corpus"]
     queries = data["queries"]
     qrels = data["qrels"]
-    # 这里先按命令行限制缩小数据规模，方便我们用同一个 importer 跑 toy / 小样本 / 更大样本。
+    # 按调用方指定的规模导入。
     corpus, queries, qrels = limit_du_retrieval_rows(
         corpus=corpus,
         queries=queries,
@@ -231,7 +231,7 @@ def main():
     )
     passage_records = build_passage_records(corpus)
 
-    # 这里把输出路径也参数化，后面切到 data/eval 或 artifacts 时就不用再改脚本正文。
+    # 输出路径由参数指定。
     output_path = Path(args.eval_output_path)
     write_jsonl(output_path, eval_records)
     passages_output_path = Path(args.passages_output_path)

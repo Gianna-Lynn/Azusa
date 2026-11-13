@@ -5,7 +5,7 @@
 3. 计算 Hit@k / Recall@k / MRR / nDCG@k 和 nearest-rank P50/P95
 4. 在终端打印摘要, 同时把结构化结果写入 output
 备注:
-MRR = (1 / N) * Σ (1 / rank_i), 其中 N 是查询总数, rank_i 是第 i 个查询的第一个正确答案出现的位置. 
+MRR = (1 / N) * Σ (1 / rank_i), 其中 N 是查询总数, rank_i 是第 i 个查询的第一个正确答案出现的位置.
 MRR 越接近 1.0 越好.
 """
 
@@ -195,7 +195,7 @@ def evaluate_case(
 
     hit_at_k = 1.0 if matched_chunk_ids else 0.0
     recall_at_k = len(matched_chunk_ids) / len(relevant_chunk_ids)
-    mrr = reciprocal_rank(retrieved_top_k, relevant_chunk_ids) # mrr是mean reciprocal rank,平均倒数排名.但是"平均"这个动作目前不在这里, 这里现在算的是"单条query的分数", 在后面的summarize_case_results中会求平均.
+    mrr = reciprocal_rank(retrieved_top_k, relevant_chunk_ids) # 单题返回倒数排名，汇总阶段再取均值。
     ndcg = normalized_discounted_cumulative_gain(retrieved_top_k, relevant_chunk_ids, top_k=top_k)
 
     return {

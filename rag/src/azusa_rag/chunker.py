@@ -52,8 +52,8 @@ def chunk_text_with_spans(text: str, chunk_size: int, overlap_size: int) -> list
             break
 
         # 阶段五：先按固定大小确定候选切分范围。
-        end = start + chunk_size  # end表示本次切割的终点. 这是朴素的end的赋值逻辑, 在后面需要依据last_boundary进行修改. 
-        
+        end = start + chunk_size  # end表示本次切割的终点. 这是朴素的end的赋值逻辑, 在后面需要依据last_boundary进行修改.
+
         candidate = text[start: end] # "切出子串" 利用Python的切片 # strip可以移除打头和尾巴上的空格 # 由于引入了边界字符机制, 不再使用.strip
 
         # 阶段六：在候选范围内寻找最靠后的自然边界。
@@ -112,7 +112,7 @@ def chunk_document(doc_dict: dict, chunk_size: int, overlap_size: int) -> list[C
     page = doc_dict["page"]
 
     # 核心切分逻辑: 调用chunk_text_with_spans函数, 获取chunk文本和对应的span信息.
-    chunk_items = chunk_text_with_spans(text=text, chunk_size=chunk_size, overlap_size=overlap_size) # 这里修改为新的chunk_text_with_spans函数, 以获取chunk文本和对应的span信息.
+    chunk_items = chunk_text_with_spans(text=text, chunk_size=chunk_size, overlap_size=overlap_size) # 同时保留切块正文与原文字符区间。
 
     # 遍历每个chunk, 生成对应的ChunkRecord对象, 并附上doc_id, chunk_id, chunk_index, source, text, page等信息.
     for index, (chunk, _, _) in enumerate(chunk_items):
@@ -126,5 +126,5 @@ def chunk_document(doc_dict: dict, chunk_size: int, overlap_size: int) -> list[C
             page = page,
         )
         doc_list.append(chunk_rec)
-        
+
     return doc_list

@@ -1,21 +1,4 @@
-//! 本地内存 HNSW 服务：验证向量边界，绑定不可变快照，并保留手工插入演示。
-//!
-//! axum 是 Rust 的 HTTP web 框架（tokio 官方出品）。
-//! 以一次请求的旅程为主线，看 axum 分别在哪个环节起作用：
-//!
-//! 客户端 HTTP 请求
-//!   │ ① 路由匹配（axum：`Router` + `.route()`）：/search + POST → search_handler
-//!   │ ② 提取器解析（axum：提取器）：`Json<SearchRequest>` 解请求体、
-//!   │        `State` 注入共享索引、`Path(id)` 取路径参数；
-//!   │        解析失败 → `JsonRejection` → 结构化错误
-//!   │ ③ handler 跑业务逻辑（与 axum 无关）：指纹校验、向量校验、HNSW 查询
-//!   │        （索引算法在 azusa 库 src/index/ 里）
-//!   │ ④ handler 返回 `Result<Json<..>, ApiError>`
-//!   │ ⑤ 序列化（axum）：Ok → 200 + JSON；Err → 对应状态码 + 错误 JSON
-//!   ▼
-//! 客户端 HTTP 响应
-//!
-//! 另外，/index/load 的 64MB 请求体上限是 axum 的 `layer` 中间件，在请求进入 handler 之前生效。
+//! 本地内存 HNSW 服务：验证向量输入，绑定不可变快照，并提供检索与记录读取。
 use axum::extract::{rejection::JsonRejection, DefaultBodyLimit, Path, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
@@ -255,7 +238,7 @@ async fn load_handler(
     payload: Result<Json<LoadRequest>, JsonRejection>,
 ) -> Result<Json<HealthResponse>, ApiError> {
     // 1.解析请求并校验快照指纹、记录 ID 和向量维度，确保整个批次合法。
-    let request = request_json(payload)?;  // 问号?的作用: 成功就继续，失败就提前返回错误。
+    let request = request_json(payload)?;
     if request.dataset_fingerprint.len() != 64
         || !request.dataset_fingerprint.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))  // 判断c是不是接下来的其中之一: 0 1 2 ... 9 a b c d e f
     {
@@ -275,15 +258,15 @@ async fn load_handler(
     if !current.index.is_empty() || current.dataset_fingerprint.is_some() {
         // 只有指纹、记录数量和每条记录都相同，才把这次请求视为重复装载。
         let matches = current.dataset_fingerprint.as_deref() == Some(&request.dataset_fingerprint)
-            // 比较快照指纹：as_deref() 将 Option<&String> 转成 Option<&str>，
-            // 再与请求中的指纹比较，确认两批数据具有相同身份。
+            // 同时核对快照身份、记录数量与实际记录内容。
+
             && current.index.len() == request.records.len()
             // 比较记录数量，避免仅凭指纹或部分记录就错误复用已有索引。
             && request.records.iter().all(|record| current.index.get_record_by_id(record.id)
-                // all() 要求每一条请求记录都满足后面的条件；只要一条不满足，结果就是 false。
+
                 .is_some_and(|stored| {
-                    // is_some_and() 要求索引中确实存在相同 ID 的记录，
-                    // 并且该记录序列化后的完整内容与请求记录相同。
+                    // 索引中必须存在相同 ID，且完整记录内容一致。
+
                     serde_json::to_value(stored).ok() == serde_json::to_value(record).ok()
                 }));
         if matches {

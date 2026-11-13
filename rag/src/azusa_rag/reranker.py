@@ -94,7 +94,7 @@ def _load_reranker_components() -> tuple:
         RERANK_MODEL_NAME,
         dtype=model_dtype,
     )
-    # 这里把模型显式搬到目标设备, 后面每个 batch 的输入也会送到同一设备上.
+    # 输入与模型使用同一设备。
     model = model.to(model_device)
     model.eval()
 
@@ -152,7 +152,7 @@ def score_query_passage_pairs(query: str, passage_list: list[str]) -> list[float
             }
 
             # SequenceClassification 模型输出 logits;
-            # 这里把它拉平成一维分数列表, 保持和输入 passage 顺序一致.
+            # 分数顺序与输入 passage 一致。
             # 将输入字典展开为模型参数，并以带字段名的结果对象返回输出。
             # logits 是模型的原始分数，通常分数越高表示 query 与 passage 越相关。
             # view(-1) 将 logits 展平成一维，便于按 passage 顺序收集分数。

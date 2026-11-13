@@ -2,18 +2,15 @@
 
 /// 每条记录的唯一标识符。
 ///
-/// Id: 每条记录的唯一标识符(主键), 用于区分不同的记录.
 pub type Id = u64;
 
 /// 一条数据的向量表示。
 ///
-/// Vector: 这条数据的向量表示
 pub type Vector = Vec<f32>;
 
 /// 记录的可选元信息。
 ///
 /// Metadata: 记录的元信息, 比如来源文档、页码等. 目前是可选的, 可以不提供.
-/// serde::Serialize和serde::Deserialize: 这两个trait允许Metadata结构体被序列化和反序列化, 方便存储和传输.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Metadata {   // 属于下面的VectorRecord的一部分.
     pub doc_id: Option<String>,
@@ -24,7 +21,6 @@ pub struct Metadata {   // 属于下面的VectorRecord的一部分.
 
 /// 一条完整的原始向量记录。
 ///
-/// derive 是 Rust中提供的派生宏语法，让编译器自动为这个结构体生成Clone和Debug trait的默认实现，不需要手动编码
 /// VectorRecord是 "一条完整的原始数据记录", 包括 id + 向量 + metadata
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct VectorRecord {
@@ -45,9 +41,6 @@ pub struct SearchResult {
 }
 
 /// 向量相似度度量方式。
-///
-/// PartialEq: 自动生成eq()和ne()方法, 允许使用==和!=
-/// Eq: 是PartialEq的升级版本, 用在需要"完全相等"(满足反射性对称性传递性)的数据结构里,比如Hashmap
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Metric {
     Cosine,

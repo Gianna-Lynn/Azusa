@@ -21,23 +21,23 @@ def load_answer_model():
     Returns:
         (tokenizer, model) 二元组.
     """
-    # 延迟加载就是在函数内部定义一个全局变量，第一次调用函数时才加载模型并赋值给这个变量。
-    # 后续调用函数时，如果变量已经有值了，就直接返回，不需要重复加载模型。
+
+
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    # 声明这两个变量是全局的，这样我们才能在函数内部修改它们的值。
+
     global _tokenizer, _model
 
     if _tokenizer is None:
-        # 从指定路径加载预训练的 tokenizer，准备对输入文本进行编码和解码。
+
         _tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
 
     if _model is None:
         _model = AutoModelForCausalLM.from_pretrained(
             MODEL_PATH,
-            # 根据模型权重自动选择合适的数据类型，通常是 float16 或 bfloat16，以节省显存和加速推理。
+
             torch_dtype="auto",
-            # 自动将模型的不同部分分配到可用的设备上（如 CPU 或 GPU），以优化性能和资源利用。
+
             device_map="auto",
         )
 
@@ -63,15 +63,8 @@ def build_context(result_records) -> str:
         context_parts.append(
             f"[chunk_id={record.chunk_id}]\n{record.text}"
         )
-        # 把每个检索结果 chunk_id 和对应的文本指定特定格式拼接成一个字符串块，添加到 context_parts 列表中。
 
-    # 最后把所有的字符串块用两个换行符连接成一个完整的上下文字符串.
-    # 返回结果形如:
-    # [chunk_id=cat_notes_3_chunk_000]
-    # JR常磐缓行线会与东京地铁千代田线直通运行，这属于常规意义上的直通运转。
-    #
-    # [chunk_id=cat_notes_3_chunk_002]
-    # 有些线路虽然存在跨线关系，但并不都属于常规意义上的直通运转，需要区分具体线路关系。
+
     return "\n\n".join(context_parts)
 
 

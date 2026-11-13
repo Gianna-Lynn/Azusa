@@ -1,4 +1,4 @@
-"""提供 Kaiji 语义网关的教学脚手架，明确参数、证据字段、路由与错误契约。"""
+"""Kaiji 语义网关：请求校验、检索与证据映射、HTTP 路由及结构化错误。"""
 
 from __future__ import annotations
 
@@ -66,11 +66,7 @@ class GatewayError(Exception):
 def validate_search_request(query: Any, k: Any, mode: Any) -> tuple[str, int, str]:
     """校验并规范化语义检索参数；所有调用方错误均不可重试。"""
 
-    # AZUSA-GW-01：完成请求参数契约。
-    # - query 必须是非空、非纯空白字符串，成功时返回 strip 后的文本；
-    # - k 必须是 int 但不能是 bool，并满足 1 <= k <= MAX_K；
-    # - mode 必须属于 SEARCH_MODES；
-    # - 每种参数错误都抛 GatewayError，HTTP 400 且 retryable=False。
+
     if not isinstance(query, str):
         raise GatewayError(
             code="invalid_query",
@@ -106,7 +102,7 @@ def validate_search_request(query: Any, k: Any, mode: Any) -> tuple[str, int, st
             f"Invalid mode. Expected mode must be one of {','.join(SEARCH_MODES)}, however mode is {type(mode)}.",
             status=HTTPStatus.BAD_REQUEST,
             retryable=False,
-        )    
+        )
     return query.strip(), k, mode
 
 class KaijiGatewayService:
@@ -120,19 +116,14 @@ class KaijiGatewayService:
     ) -> None:
         self._records = embedding_records
         self._records_by_chunk_id = {
-            record.chunk_id: record for record in embedding_records # 这里的key是字符串, 形如"stromules-1962", 而不是整数.
+            record.chunk_id: record for record in embedding_records
         }
         self._search_function = search_function
 
     def search_azusa(self, query: Any, k: Any, mode: Any) -> dict[str, Any]:
         """执行检索并映射完整证据字段；后端异常统一为可重试 503。"""
 
-        # AZUSA-GW-02：
-        # 1. 先调用 validate_search_request；
-        # 2. 只调用一次 self._search_function(query, records, k, mode)；
-        # 3. 每条 EmbeddingRecord 映射 chunk_id/text/score/source/page/metadata；
-        # 4. source_map 存在时，按结果顺序保存 retrieval_source；
-        # 5. 未预期的后端异常转成 retryable=True 的 HTTP 503 GatewayError。
+
         query, k, mode = validate_search_request(query, k, mode)
         try:
             EmbeddingRecord_list, source_map_list= self._search_function(query, self._records, k, mode)
@@ -145,14 +136,10 @@ class KaijiGatewayService:
                 status=HTTPStatus.SERVICE_UNAVAILABLE,
                 retryable=True,
             )
-        # source_map 如果不是None, 根据rag\src\azusa_rag\search_hybrid.py中的build_source_map定义, source_map应当形如:
-        # [
-        #     {"id": 12, "source": "dense + sparse"},
-        #     {"id": 35, "source": "dense"}, 
-        #     {"id": 43, "source": "sparse"},
-        # ]
+
+
         hits = list()
-        # 来源标记可选；缺失或短于命中列表时仍必须保留证据。
+
         for index, embedding_record in enumerate(EmbeddingRecord_list):
             retrieval_source = None
             if source_map_list is not None and index < len(source_map_list):
@@ -160,7 +147,7 @@ class KaijiGatewayService:
             hits.append({
                 "chunk_id": embedding_record.chunk_id,
                 "text": embedding_record.text,
-                "score": None,  # EmbeddingRecord 没有检索分数字段。
+                "score": None,
                 "source": embedding_record.source,
                 "page": embedding_record.page,
                 "metadata": {
@@ -173,14 +160,9 @@ class KaijiGatewayService:
         return {"mode":mode, "hits":hits}
 
     def get_chunk_by_id(self, chunk_id: Any) -> dict[str, Any]:
-        """按稳定 chunk_id 返回完整证据；非法或未知标识不可重试。"""
+        """按稳定 chunk_id 读取证据；非法或未知 ID 返回结构化错误。"""
 
-        # AZUSA-GW-03：
-        # - 非字符串、空或纯空白 ID 返回不可重试 HTTP 400；
-        # - 使用 _records_by_chunk_id 做精确查找，不做模糊或字符串强转；
-        # - 未知 ID 返回不可重试 HTTP 404；
-        # - 成功响应包含 chunk_id/text/source/page 与 doc_id/chunk_index metadata。
-        
+
         if not isinstance (chunk_id, str):
             raise GatewayError(
                 code="invalid_chunk_id",
@@ -195,16 +177,10 @@ class KaijiGatewayService:
                 status=HTTPStatus.BAD_REQUEST,
                 retryable=False,
             )
-        
-        record = self._records_by_chunk_id.get(chunk_id) # record.chunk_id: record for record in embedding_records
-        # self._records_by_chunk_id 形如:
-        # {
-        #     "chunk-A": record_A,
-        #     "chunk-B": record_B,
-        #     "chunk-C": record_C,
-        #     "chunk-D": record_D,
-        # }
-        # 调用.get(chunk_id)之后, 会得到一个唯一确定的chunk记录record.
+
+        record = self._records_by_chunk_id.get(chunk_id)
+
+
         if record is None:
             raise GatewayError(
                 code="chunk_not_found",
@@ -213,7 +189,7 @@ class KaijiGatewayService:
                 retryable=False,
             )
         return {
-            # 成功响应包含 chunk_id/text/source/page 与 doc_id/chunk_index metadata。
+
             "chunk_id" : chunk_id,
             "text": record.text,
             "source": record.source,
@@ -238,13 +214,13 @@ def search_azusa(query: str, k: int, mode: str) -> dict[str, Any]:
 
 
 def get_chunk_by_id(chunk_id: str) -> dict[str, Any]:
-    """提供任务书要求的进程内稳定证据读取入口。"""
+    """按稳定 chunk_id 读取证据；非法或未知 ID 返回结构化错误。"""
 
     return get_default_service().get_chunk_by_id(chunk_id)
 
 
 class KaijiGatewayHTTPServer(ThreadingHTTPServer):
-    """把语义服务附着到支持并发请求的教学 HTTP Server。"""
+    """将语义服务绑定到支持并发请求的 HTTP Server。"""
 
     daemon_threads = True
 
@@ -262,10 +238,8 @@ class KaijiGatewayRequestHandler(BaseHTTPRequestHandler):
 
     server: KaijiGatewayHTTPServer
     def do_POST(self) -> None:
-        # AZUSA-GW-04a：只接受Kaiji发来的 POST /search_azusa；使用 _read_json 解析对象，调用
-        # Service；GatewayError 保留状态码，其他异常返回不泄露堆栈的可重试 500。
-        
-        # 1. 确认路径是 /search_azusa
+
+
         if self.path != "/search_azusa":
             self._write_error(
                 GatewayError(
@@ -277,25 +251,17 @@ class KaijiGatewayRequestHandler(BaseHTTPRequestHandler):
             )
             return
         try:
-            # 2. 读取JSON body, 从body中取得 query/k/mode. 
-            json_dict = self._read_json()  # json_dict 形如 {'query': 'Kaiji', 'k': 1, 'mode': 'bm25'}. 失败直接抛出GatewayError.
-            # F:\Repositories\Kaiji\src\kaiji\adapters\azusa.py 当中定义了Kaiji的post内容
-            # response = self._client.post(
-            #     url="/search_azusa", 
-            #     json={
-            #         "query":query,
-            #         "k":k,
-            #         "mode":mode
-            #     }
-            # )
+
+            json_dict = self._read_json()
+
 
             query = json_dict.get("query")
             k = json_dict.get("k")
             mode = json_dict.get("mode")
-        
-            #.search_azusa(...)可以校验这三个参数.
-            result = self.server.service.search_azusa(query, k, mode) # 注意这个地方不能直接调用search_azusa, 它会加载完整的默认 embedding 数据和搜索依赖
-            # result 不需要判空, 因为 result可能是空字典.
+
+
+            result = self.server.service.search_azusa(query, k, mode)
+
             self._write_json(
                 status=HTTPStatus.OK,
                 payload=result,
@@ -324,20 +290,19 @@ class KaijiGatewayRequestHandler(BaseHTTPRequestHandler):
                 },
             )
             return
-        # AZUSA-GW-04b：只接受 GET /chunks/{chunk_id}，对单个路径段做 URL 解码；
-        # 未知路由返回结构化 404，Service 的 GatewayError 保留自身状态与策略。
+
 
         try:
             prefix = "/chunks/"
-            if path[:len(prefix)] != prefix:        # 非法的path, 形如"/unknown"
+            if path[:len(prefix)] != prefix:
                 raise GatewayError(
                     "route_not_found",
                     f"{path} not found",
                     status=HTTPStatus.NOT_FOUND,
                     retryable=False,
                 )
-            encoded_chunk_id = path[len(prefix):]   # 形如 "folder%2Fchunk%201"
-            chunk_id = unquote(encoded_chunk_id)    # 形如 "folder/chunk 1"
+            encoded_chunk_id = path[len(prefix):]
+            chunk_id = unquote(encoded_chunk_id)
             result_dict = self.server.service.get_chunk_by_id(chunk_id)
             self._write_json(
                 HTTPStatus.OK,

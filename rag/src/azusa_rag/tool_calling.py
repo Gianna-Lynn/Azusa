@@ -1,24 +1,4 @@
-"""
-Agent工具调用的实现.
-数据流:
-evidence
-  ↓
-ToolCall
-  ↓
-execute_with_retry
-  ↓
-execute_tool_call
-  ↓
-executor
-  ↓
-ToolAttempt
-  ↓
-ToolExecutionTrace
-  ↓
-build_tool_context
-  ↓
-Answerer
-"""
+"""最小工具调用运行时：校验调用、有界重试、记录尝试，并只将成功结果送入回答上下文。"""
 
 from __future__ import annotations
 
@@ -49,9 +29,9 @@ class ToolDefinition:
 class ToolCall:
     """记录一次逻辑工具调用的唯一编号、调用的工具名和传给工具的参数。"""
 
-    call_id: str                    #  call_id="call_001",
-    tool_name: str                  #  tool_name="get_chunk_by_id",
-    arguments: dict[str, Any]       #  arguments={"chunk_id": "chunk_001"},
+    call_id: str
+    tool_name: str
+    arguments: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
         """转换为可写入 Agent JSON trace 的普通字典。"""
@@ -92,7 +72,7 @@ class ToolExecutionTrace:
     记录一次逻辑调用及其全部执行尝试，方便写入 Agent trace。
     把一个ToolCall和它所有的ToolAttempt放在一起.
     """
-    call: ToolCall      # 包含call_id, tool_name, arguments                             
+    call: ToolCall      # 包含call_id, tool_name, arguments
     attempts: list[ToolAttempt] = field(default_factory=list)   # 形如 attempts = [attempt_0 , attempt_1]
     used_in_answer: bool = False
 
@@ -160,7 +140,7 @@ def execute_tool_call(
     tool_definitions_list = get_tool_definitions()
     _tool_name = tool_call.tool_name
     _arguments = tool_call.arguments  # _arguments的类型是dict[str, Any], 形如{"chunk_id": "chunk_001"}
-       
+
     # 工具名称校验
     tool_definition = None
     for definition in tool_definitions_list:
@@ -172,7 +152,7 @@ def execute_tool_call(
         tool_attempt.error_message = ERROR_UNKNOWN_TOOL
 
         return finish()
-    
+
     # 工具参数校验
     # 检查: required_arguments 中的每个参数名，是否都存在于 arguments 的键中。
     required_args = tool_definition.required_arguments # 形如 ("chunk_id",)
@@ -181,7 +161,7 @@ def execute_tool_call(
             tool_attempt.error_type = ERROR_MISSING_ARGUMENT
             tool_attempt.error_message = ERROR_MISSING_ARGUMENT
             return finish()
-    
+
     # 工具名称校验通过, 工具参数校验也通过.
     tool_attempt.error_type = None
     tool_attempt.error_message = None
@@ -215,7 +195,6 @@ def execute_tool_call(
     #     result={"chunk_id": "chunk_001", "text": "..."},
     # )
 
-    
 
 def execute_with_retry(
     tool_call: ToolCall,
@@ -231,7 +210,7 @@ def execute_with_retry(
     trace.attempts = []
     trace.used_in_answer = False
     for i in range(max_attempts):
-        
+
         # # 考虑函数没有传入自定义executor的情况: 默认执行函数是get_chunk_by_id
         # if executor is None and tool_call.tool_name == GET_CHUNK_TOOL_NAME:
         #     # 如果调用者没有传入自定义 executor，怎样把 get_chunk_by_id 和 embedding_records 绑定成一个可调用对象？
@@ -239,7 +218,7 @@ def execute_with_retry(
         # 由于已经在 execute_tool_call中实现了默认executor, 就不需要在上层函数中单独再次配置默认executor, 避免重复.
         tool_attempt = execute_tool_call(tool_call=tool_call, embedding_records=embedding_records, attempt=i, executor=executor)
         trace.attempts.append(tool_attempt)
-        if tool_attempt.status == "success": 
+        if tool_attempt.status == "success":
             # 此处不要使用 .result is not None 来判断, 因为失败也可能错误地留下结果, 要优先相信status
             # 比如attempt.status = "failed" , attempt.result = {"partial": "残留数据"}
             trace.used_in_answer = True
@@ -253,7 +232,7 @@ def build_tool_context(tool_trace: ToolExecutionTrace) -> str:
     接收execute_with_retry返回的ToolExecutionTrace,
     把attempt等于"success"的工具结果提取出result, 收集起来转换成 Answerer 可消费的上下文
     """
-    
+
     # tool_trace
     # ├── call
     # │     ├── tool_name

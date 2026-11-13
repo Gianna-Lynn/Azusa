@@ -8,7 +8,7 @@
 
 设计原则:
 - 尽量复用现有 importer / embed / eval / search 核心逻辑
-- 结果优先写到 data/processed，避开当前环境里 output/eval_runs 的偶发写入问题
+- 结果写入独立的 data/processed 工作流目录
 """
 from __future__ import annotations
 
@@ -464,7 +464,7 @@ def main() -> None:
             )
     steps["run_eval_modes"]["status"] = "completed"
 
-    # 这里直接把 summary 手工写进 data/processed，避开当前环境里 output/eval_runs 的写入问题。
+    # 该 workflow 的汇总使用独立的 processed 输出路径。
     bm25_eval_path.write_text(
         json.dumps(eval_summaries.get("bm25"), ensure_ascii=False, indent=2),
         encoding="utf-8",

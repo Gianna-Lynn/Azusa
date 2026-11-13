@@ -66,7 +66,7 @@ impl HnswNode {
     /// 从所有层删除一个单向邻居关系。
     pub fn delete_neighbor_single_direction_at_all_levels(&mut self, neighbor_index: usize) {
         for i in 0..=self.node_max_level {
-            // retain 保留满足条件的元素；这里等价于删掉所有等于 neighbor_index 的项。
+            // 移除匹配的邻居。
             self.neighbors[i].retain(|&idx| idx != neighbor_index);
         }
     }

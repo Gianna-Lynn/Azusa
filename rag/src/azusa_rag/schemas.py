@@ -1,8 +1,4 @@
-"""
-说明 Azusa在内存中把一条chunk / 一条embedding 记录成什么样的结构.
-schema的英文含义是“模式、结构、蓝图”，在这里指的是数据的结构定义。
-它定义了数据的字段、类型和默认值等信息，确保数据在内存中有一致的表示方式。
-"""
+"""知识库文档、chunk 与 embedding 的字段定义；稳定身份与版本信息随记录传递。"""
 
 from dataclasses import asdict, dataclass, field
 from typing import Any, Optional
@@ -24,7 +20,7 @@ class ChunkRecord:      # 定义chunk metadata
 
     def to_dict(self) -> dict:  # 本方法可以把ChunkRecord这个对象变成普通字典, 字典适合json.dumps(...)
         return asdict(self)
-    
+
 @dataclass
 class EmbeddingRecord:
     doc_id: str
@@ -40,7 +36,7 @@ class EmbeddingRecord:
     end_char: Optional[int] = None
     section_path: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
-    
+
     def to_dict(self) -> dict:
         return asdict(self)
 

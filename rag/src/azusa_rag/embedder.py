@@ -67,99 +67,70 @@ def _load_embedding_components() -> tuple:
 
 
 def _last_token_pool(last_hidden_states: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
-    """
-    使用Qwen官方推荐的last-token pooling方式提取embedding.
+    """提取每条文本最后一个有效 token 的 hidden state，兼容左右 padding。
 
-    具体而言, 这种办法是:
-    模型会为输入文本中的每个 token 生成一个 hidden state，
-    形状通常为[sequence_length, hidden_size]. 
-    也就是说, 对于sequence_length个token, 
-    每个token都有一个hidden vector, 维度是hidden_size.
-    pooling 的作用是从这一串 token 向量中汇总出一个固定长度的文本向量，
-    方便后续进行相似度计算和向量检索.
-    last-token pooling 选择文本最后一个有效 token 的 
-    hidden state 作为整段文本的 embedding；
-    这里的“最后一个”指真实文本的最后一个 token，不是padding 补位 token.
-    """
-    # attention_mask 的形状通常是 [batch_size, sequence_length].
-    # 左侧 padding 时，每条序列的最右侧位置都是真实 token，因此最后一列全为 1.
+    左 padding 直接取末列；右 padding 按 attention_mask 的有效长度定位。"""
+
+
     left_padding = (attention_mask[:, -1].sum() == attention_mask.shape[0])
 
     if left_padding:
-        # 左侧 padding 的布局类似:
-        # [PAD, PAD, token_1, token_2, last_token]
-        # 所有样本的最后一个位置都是有效的 last token，直接取最后一列即可.
+
+
         return last_hidden_states[:, -1]
 
-    # 非左侧 padding 时，padding 通常在右侧，不同文本的最后一个有效 token
-    # 可能位于不同位置. attention_mask 每行求和得到有效 token 数量，
-    # 减 1 后转换为从 0 开始的最后有效 token 索引.
+
     sequence_lengths = attention_mask.sum(dim=1) - 1
 
-    # 为 batch 中的每条样本生成行号:
-    # [0, 1, 2, ..., batch_size - 1].
+
     batch_size = last_hidden_states.shape[0]
     batch_index = torch.arange(batch_size, device=last_hidden_states.device)
 
-    # 使用“每条样本的行号 + 该样本最后一个有效 token 的列号”
-    # 取出每条文本对应的最后一个 token 的 hidden state.
+
     return last_hidden_states[batch_index, sequence_lengths]
 
 
 def embed_text_list(text_list: list[str]) -> list[list[float]]:
-    """
-    把一批文本编码成向量列表.
-    """
+    """按输入顺序分批编码；last-token pooling 后截取配置维度并做 L2 归一化。
+
+    输入按最大 token 长度截断，张量送至模型实际设备；输出为 CPU 浮点列表。空输入返回空列表。"""
     if not text_list:
         return []
 
-    # 下面的_load_embedding_components()提供的是“已经准备好的编码器组件”:
-    # tokenizer负责把字符串变成token id,
-    # model负责把token序列变成hidden states,
-    # model_device表示这次推理实际跑在cpu还是cuda上.
+
     tokenizer, model, model_device = _load_embedding_components()
 
     embedding_list: list[list[float]] = []
 
-    # 这里只做推理, 不做训练, 所以用no_grad()关闭梯度计算, 节省显存和时间.
+
     with torch.no_grad():
-        # 按批次处理文本, 避免一次性把所有文本都塞进模型导致显存/内存压力过大.
+
         for start in range(0, len(text_list), EMBEDDING_BATCH_SIZE):
             batch_text_list = text_list[start : start + EMBEDDING_BATCH_SIZE]
 
-            # tokenizer会把一批字符串转成模型可接收的张量字典.
-            # 常见键包括:
-            # - input_ids: 每个token对应的整数编号
-            # - attention_mask: 哪些位置是真实文本, 哪些位置只是padding补位
+
             batch_dict = tokenizer(
                 batch_text_list,
-                padding=True,                   # 把这一批文本补齐到相同长度, 方便一起送进模型
-                truncation=True,                # 如果文本太长, 就截断到max_length
-                max_length=EMBEDDING_MAX_LENGTH,# 限制单条文本最多使用多少token
-                return_tensors="pt",            # 直接返回PyTorch张量, 而不是普通Python列表
+                padding=True,
+                truncation=True,
+                max_length=EMBEDDING_MAX_LENGTH,
+                return_tensors="pt",
             )
 
-            # tokenizer刚生成的张量默认在CPU上.
-            # 如果模型跑在cuda, 输入也必须搬到同一个device上, 否则会报错.
+
             batch_dict = {
                 key: value.to(model_device)
                 for key, value in batch_dict.items()
             }
 
-            # **的意思是“把字典摊开传参”.
-            # 这里等价于 model(input_ids=..., attention_mask=..., ...)
-            # outputs 是模型前向传播的返回对象, 其中 last_hidden_state 是形状为
-            # (batch_size, sequence_length, hidden_size) 的三维张量.
-            # 也就是: batch中的每段文本, 都会为每个token生成一个hidden vector.
+
             outputs = model(**batch_dict)
 
-            # 但我们最终需要的是“每段文本一个向量”, 不是“每个token一个向量”.
-            # 所以这里用Qwen官方推荐的last-token pooling,
-            # 把token级表示压成句子/段落级表示.
+
             embeddings = _last_token_pool(
                 outputs.last_hidden_state,
                 batch_dict["attention_mask"],
-            )   # 此时 embeddings 的shape是 (batch_size, hidden_size)
+            )
 
             hidden_size = embeddings.shape[1]
             if EMBEDDING_DIM > hidden_size:
@@ -167,16 +138,13 @@ def embed_text_list(text_list: list[str]) -> list[list[float]]:
                     f"EMBEDDING_DIM={EMBEDDING_DIM} exceeds model hidden size {hidden_size}"
                 )
 
-            # 当前模型原生输出是1024维.
-            # 这里允许按配置只取前EMBEDDING_DIM维, 方便控制存储成本和后续实验.
+
             embeddings = embeddings[:, :EMBEDDING_DIM]
 
-            # L2归一化后, 每个向量的长度都会变成1.
-            # 这样后面做余弦相似度检索时, 比较的重点就是“方向是否接近”.
-            # 这里也顺手统一一下项目口径: SIFT1M 这类benchmark主线偏L2, 当前RAG文本检索先按更常见的 cosine 路线走.
+
             embeddings = F.normalize(embeddings, p=2, dim=1)
 
-            # 最后把这一批embedding搬回CPU, 转成普通Python列表, 方便写入jsonl.
+
             embedding_list.extend(embeddings.cpu().tolist())
 
     return embedding_list

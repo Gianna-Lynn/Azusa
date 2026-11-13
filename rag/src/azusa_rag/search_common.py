@@ -1,12 +1,4 @@
-"""
-给检索各个子模块共用的基础 helper。
-
-这里放的是几类“谁都可能用到，但不属于某个具体检索后端”的东西：
-1. 读默认 query
-2. query 做 embedding
-3. 向量点积
-4. EmbeddingRecord <-> id / vector 的映射
-"""
+"""检索公共 helper：查询读取、向量编码、内积与记录下标映射。"""
 
 from __future__ import annotations
 
@@ -26,10 +18,7 @@ def get_query() -> str:
 
 
 def embed_query(query: str) -> list[float]:
-    """
-    用 embed_text_list 方法得到 query vector。
-    但这里我们只传一条 query，所以取第一个元素即可。
-    """
+    """编码一条查询并返回对应向量。"""
     # embed_text_list 返回 list[list[float]]，
     # 但这里我们只传一条 query，所以取第一个元素即可。
     return embed_text_list([query])[0]

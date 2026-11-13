@@ -35,10 +35,10 @@ class ImportedEvalCase:
     """
     表示一条可直接写入 eval jsonl 的评测样本.
     """
-    query_id: str                   # query_id 是这条query的唯一标识, 形如 cat_notes_query, 供后续 eval 时对照检查用. 这里沿用 doc_id + "_query" 的命名规则, 这样下游 search / eval 不需要改接口.
-    query: str                      # query 是评测样本中的问题文本, 供后续 eval 时直接拿来做检索和问答用.
-    relevant_chunk_ids: list[str]   # 哪些 chunk_id 是这个 query 的相关 chunk, 供后续 eval 时对照检查用.
-    notes: str                      # 其他备注信息, 供后续查看 eval case 时参考用. 这里先保留一些最基本的定位信息, 方便之后看 bad case 时快速定位到原始数据是什么样子的.
+    query_id: str
+    query: str
+    relevant_chunk_ids: list[str]
+    notes: str
 
     def to_dict(self) -> dict[str, Any]:
         """
@@ -53,20 +53,11 @@ class ImportedEvalCase:
 
 
 def sanitize_slug(text: str) -> str:
-    """
-    slug是别名的意思. 本函数把原来的文件名修改成成适合放进文件名 / doc_id 的安全片段.
-    """
+    """将文本规范化为适合文件名和 doc_id 的安全片段。"""
     slug = re.sub(r"[^0-9a-zA-Z]+", "_", text).strip("_").lower()
     if not slug:
         return "item"
     return slug
-    # 把各种奇怪字符都换成下划线
-    # 去掉开头结尾多余的下划线
-    # 全部转成小写
-    # 如果最后什么都没剩下，就默认返回 item
-    # 比如：
-    # Hello, World! 变成 hello_world
-    # SQuAD-sample/validation 变成 squad_sample_validation
 
 
 def fetch_dataset_rows(
@@ -76,9 +67,7 @@ def fetch_dataset_rows(
     offset: int,
     length: int,
 ) -> list[dict[str, Any]]:
-    """
-    从 Hugging Face datasets-server 拉取一小段数据行.
-    """
+    """从 datasets-server 获取 rows，并剥离每行的 row 元数据外壳。"""
     query_string = urlencode(
         {
             "dataset": dataset,
@@ -88,17 +77,17 @@ def fetch_dataset_rows(
             "length": length,
         }
     )
-    request = urllib.request.Request( # 构造 HTTP 请求, 直接把参数放在 URL query string 里.
+    request = urllib.request.Request(
         url=f"{DATASET_ROWS_API}?{query_string}",
         headers={"User-Agent": "Azusa-RAG-Dataset-Importer/0.1"},
         method="GET",
     )
-    with urllib.request.urlopen(request) as response: # 发送 HTTP 请求并获取响应, 这里可能会抛出异常, 比如网络错误或者服务器返回错误状态码.
-        response_dict = json.loads(response.read().decode("utf-8"))  # response_dict 形如 { ..., "rows": [ {"row": {...}}, {"row": {...}}, ... ] , ...}
+    with urllib.request.urlopen(request) as response:
+        response_dict = json.loads(response.read().decode("utf-8"))
 
     rows = []
-    for row_item in response_dict["rows"]: # row_item 形如 {"row": {...}}，真正的数据在 "row" 键里。datasets-server 之所以这么设计，是为了在每条数据外层还包一层 metadata，比如说这个数据是从哪个 dataset/config/split 拉来的，方便后续追踪和调试。但对于我们当前的目的来说，这些 metadata 暂时用不到，所以这里直接取 "row" 键里的内容作为我们真正需要的数据行。
-        # datasets-server 返回的每个元素外层还包了一层 row metadata, 这里统一只取真正的数据本体.
+    for row_item in response_dict["rows"]:
+
         rows.append(row_item["row"])
     return rows
 
@@ -120,7 +109,7 @@ def build_relevant_chunk_ids(
     """
     根据答案字符区间, 推导这条样本命中了哪些 chunk_id.
     """
-    chunk_items = chunk_text_with_spans( # 把 context 切成一块块的 chunk, 同时拿到每块 chunk 在 context 里的字符区间. 
+    chunk_items = chunk_text_with_spans( # 把 context 切成一块块的 chunk, 同时拿到每块 chunk 在 context 里的字符区间.
         text=context,
         chunk_size=CHUNK_SIZE,
         overlap_size=CHUNK_OVERLAP,
@@ -246,7 +235,7 @@ def import_hf_squad_sample(
     执行一次完整导入:
     拉样本 -> 写 raw txt -> 生成 eval jsonl -> 抽样写 query txt.
     """
-    dataset_slug = sanitize_slug(dataset.replace("/", "_")) 
+    dataset_slug = sanitize_slug(dataset.replace("/", "_"))
     rows = fetch_dataset_rows(
         dataset=dataset,
         config=config,

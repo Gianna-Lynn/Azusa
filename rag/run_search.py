@@ -120,7 +120,7 @@ def build_result_dict(
         }
         if source_dict_list is not None:
             result_item["retrieval_source"] = source_dict_list[rank - 1]["source"]
-        
+
         result_items.append(result_item)
 
     result_dict = {
@@ -190,10 +190,10 @@ def write_search_outputs(
 
 def run_search_result(
     query: str,
-    embedding_records: list[EmbeddingRecord],       # 所有可检索的 EmbeddingRecord 列表
-    mode: str,                  # 检索模式, 目前支持 "brute" / "hnsw"
-    top_k: int,                 # 最终返回的 top-k 结果数, 也就是用户最关心的命中记录数
-    with_answer: bool = False,  # 是否在搜索结果上再跑一次 answerer, 生成最终答案文本
+    embedding_records: list[EmbeddingRecord],
+    mode: str,
+    top_k: int,
+    with_answer: bool = False,
 ) -> dict:
     """
     对单条 query 执行一次完整搜索，并返回统一结果字典。

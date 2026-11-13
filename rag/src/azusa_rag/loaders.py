@@ -39,7 +39,7 @@ def load_documents(files_path: Path) -> list[dict]:
 
     for txt_path in txt_paths:
         text = load_text_file(txt_path)
-  
+
         if not text.strip():
             continue
 
@@ -49,9 +49,9 @@ def load_documents(files_path: Path) -> list[dict]:
             "text"   : text,
             "page"   : None,
         }
-    
+
         documents.append(document)
-    
+
     if not documents:
         raise ValueError("In directory: " + str(files_path) + ", all the .txt files are blank")
 
@@ -65,9 +65,9 @@ def load_chunk_records(jsonl_path: Path) -> list[ChunkRecord]:
     chunk_record_list = []
 
     with jsonl_path.open("r", encoding="utf-8") as jsonl_file:
-        
+
         for line in jsonl_file:
-            record_dict = json.loads(line)  # 这里的record_dict是一个字典, 这个字典的结构刚好和ChunkRecord一致
+            record_dict = json.loads(line)  # JSON 字段与 ChunkRecord 构造参数对应。
             chunk_record = ChunkRecord(**record_dict) # chunks.jsonl里每一行的键, 都和ChunkRecord的字段名一致. **方法可以"把字典摊开", 直接赋值进去.
             chunk_record_list.append(chunk_record)
 
@@ -82,9 +82,9 @@ def load_embedding_records(jsonl_path: Path) -> list[EmbeddingRecord]:
     embedding_record_list = []
 
     with jsonl_path.open("r", encoding="utf-8") as jsonl_file:
-        
+
         for line in jsonl_file:
-            record_dict = json.loads(line)  # 这里的record_dict是一个字典, 这个字典的结构刚好和ChunkRecord一致
+            record_dict = json.loads(line)  # JSON 字段与 ChunkRecord 构造参数对应。
             embedding_record = EmbeddingRecord(**record_dict) # chunks.jsonl里每一行的键, 都和ChunkRecord的字段名一致. **方法可以"把字典摊开", 直接赋值进去.
             embedding_record_list.append(embedding_record)
 

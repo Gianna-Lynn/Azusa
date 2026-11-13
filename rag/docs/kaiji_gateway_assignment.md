@@ -1,7 +1,7 @@
 # Kaiji Semantic Gateway 练习
 
-正确答案：`solution/azusa-v2`
-练习分支：`main`
+正确答案：`solution`
+已完成记录：Gateway 已在 main / develop / solution 实现。本文保留任务契约与复验入口，不表示仍待实现。
 
 环境：
 

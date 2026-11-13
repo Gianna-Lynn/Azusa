@@ -23,14 +23,14 @@ Azusa 是一个由 Rust 向量检索服务和 Python RAG 实验链路组成的�
                                                          |
                                                     RRF -> rerank
                                                          |
-                                                    过滤/ACL
+                                         过滤/ACL（仅 solution 完整实现）
                                                          |
                                                   evidence -> answer / Agent
 
 Kaiji gateway -> search / chunk / health
 ```
 
-当前仓库在 `main` 分支上承载课程 TODO；`solution/azusa-v2` 是完整参考实现。README 和设计文档中的“已支持”能力需要结合当前分支确认，尤其是 `knowledge_base.py`、`filters.py` 和 `kaiji_gateway.py` 中以 `NotImplementedError` 标记的 TODO，不要未经验证就当作已完成能力。
+长期分支为 `main`（对外展示）、`develop`（人的开发与练习）、`solution`（Agent 参考答案）。`main` 保留已完成的检索、评测、增量 KB、Gateway 与 Agent，不提供 metadata filter/ACL；对应四项练习与测试仅在 `develop`，完整实现在 `solution`。修改前先确认当前分支；不得把答案整体合入 `main`，不得将已完成任务重新挖空。
 
 ## 协作与环境约定
 
@@ -147,7 +147,7 @@ python run.py du-retrieval-workflow
 - `loaders.py`、`knowledge_base.py`：读取源文档、生成稳定身份、构建 chunk、维护 manifest 和 embedding 产物。
 - `chunker.py`、`embedder.py`：传统切块和 embedding 生成。
 - `search.py`：统一检索门面；`search_hnsw.py`、`search_sparse.py`、`search_hybrid.py` 分别负责后端细节。
-- `filters.py`：metadata filter 与最小 ACL；当前主线可能仍保留课程 TODO。
+- `filters.py`：仅 `develop` / `solution` 提供；前者保留四项练习，后者提供 metadata filter 与最小 ACL。`main` 不导出相关入口。
 - `reranker.py`、`answerer.py`：候选重排、回答生成和 citation 规范化。
 - `agent.py`、`tool_calling.py`：query 分类、rewrite、multi-hop、evidence fusion 和最小工具调用运行时。
 - `kaiji_gateway.py`：面向 Kaiji 的进程内/HTTP 语义网关，包含参数校验、检索结果映射、chunk 查询和结构化错误。
@@ -196,7 +196,8 @@ python -m pytest
 涉及特定模块时优先运行对应测试，例如：
 
 ```powershell
-python -m pytest tests/test_knowledge_base.py tests/test_filters.py
+python -m pytest tests/test_knowledge_base.py
+# 仅 develop / solution：python -m pytest tests/test_filters.py
 python -m pytest tests/test_agent.py tests/test_agent_eval.py tests/test_tool_calling_assignment.py
 python -m pytest tests/test_kaiji_gateway.py tests/test_benchmark_lab.py
 ```
@@ -205,7 +206,7 @@ python -m pytest tests/test_kaiji_gateway.py tests/test_benchmark_lab.py
 
 ## 修改时的注意事项
 
-- `main` 分支的课程 TODO 和 `solution/azusa-v2` 的完整实现必须区分；修复 TODO 前先看对应任务书、追踪文档和测试契约。
+- `develop` 的课程 TODO 和 `solution` 的参考实现必须区分；修复前先看任务书与测试契约。功能在 `develop` 完成、理解并验收后，按功能提交进入 `main`；展示修复需同步回开发与答案分支。
 - 稳定 `document_id`、`chunk_id`、内容哈希、manifest 和 embedding 复用关系属于数据契约，修改前要检查向后兼容和删除语义。
 - 过滤采用 over-fetch 后过滤时，结果可能少于请求的 `k`；不要把它描述成原生 filtered ANN。
 - dense 与 sparse 分数不可直接比较，hybrid 使用 RRF；需要调整融合逻辑时同步检查 source map、trace 和评测。

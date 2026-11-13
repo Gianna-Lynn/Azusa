@@ -5,8 +5,9 @@ Kaiji 是 Azusa 上层的单 Agent Runtime。Azusa 继续负责检索与证据�
 
 ## 分支
 
-- `main`：同一契约、测试和启动框架，Gateway 核心逻辑留作 TODO。
-- `solution/azusa-v2`：包含 Gateway 与 Azusa v2 的完整可运行答案。
+- `main`：Gateway 请求校验、检索映射、证据读取与 HTTP 路由已实现。
+- `develop`：保留上述实现，继续开发与学习。
+- `solution`：同步 Gateway 改进，额外提供 Filter/ACL 参考答案。
 
 ## 稳定接口
 
@@ -28,10 +29,10 @@ get_chunk_by_id(chunk_id)
 `score`、`source`、`page` 和 `metadata`。参数错误、找不到 chunk 和后端失败使用结构化
 HTTP 错误，不把 traceback 暴露给 Kaiji。
 
-## 正确答案分支运行方式
+## main 展示分支运行方式
 
 ```powershell
-git switch solution/azusa-v2
+git switch main
 Set-Location rag
 $py = 'D:\Chuo_Data\conda_envs\ChuoEnv\python.exe'
 
@@ -51,9 +52,9 @@ git switch solution/kaiji-v0
 & $py -m pytest tests/test_azusa_live_integration.py
 ```
 
-## `main` 学习目标
+## 已完成的 Gateway 学习记录
 
-按 `rag/docs/kaiji_gateway_assignment.md` 的顺序完成：
+`rag/docs/kaiji_gateway_assignment.md` 保留以下已实现任务及跨仓库验收入口：
 
 1. 请求参数与 mode 校验；
 2. `search_azusa(query, k, mode)` 对现有检索门面的调用与响应映射；

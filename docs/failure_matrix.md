@@ -1,7 +1,6 @@
 # Azusa v2 Failure Matrix
 
-本表描述 `solution/azusa-v2` 的控制与残余风险；`main` 的 TODO 完成后必须重新逐项验证，
-不能因参考答案自洽而直接宣称课程实现安全。
+本表区分 main 的交付能力与 solution 的 Filter/ACL 参考能力。develop 完成练习后仍须独立验收，不能直接继承答案分支的验证结论。
 
 | Boundary | Failure | Current control | Residual risk / evidence |
 | --- | --- | --- | --- |
@@ -10,10 +9,10 @@
 | Update | unchanged text is embedded again | manifest diff and embedding reuse | model/version changes require a deliberate full rebuild |
 | Delete | stale evidence remains searchable | removed chunks omitted from durable artifacts | running HNSW must be restarted/rebuilt |
 | Artifact write | process stops mid-write | same-directory temporary file and atomic replace | three files are atomic individually, not a multi-file transaction |
-| Tenant isolation | cross-tenant evidence leak | ACL tenant equality check | missing tenant metadata is treated as shared/public data |
-| Visibility | unknown policy value becomes visible | unknown values fail closed | policy model is intentionally minimal |
-| ANN filter | post-filter returns fewer than k | configurable over-fetch and trace counts | not equivalent to native filtered ANN |
-| Index version | same record count but different corpus | KB v1 requires restart/rebuild after sync | legacy Rust health endpoint has no generation ID yet |
+| Tenant isolation (solution only) | cross-tenant evidence leak | ACL tenant equality check | missing tenant metadata is treated as shared/public data |
+| Visibility (solution only) | unknown policy value becomes visible | unknown values fail closed | policy model is intentionally minimal |
+| ANN filter (solution only) | post-filter returns fewer than k | configurable over-fetch and trace counts | not equivalent to native filtered ANN |
+| Index version | same record count but different corpus | immutable snapshot load plus query fingerprint checks | changed artifacts still require restart/rebuild; fingerprint is not authentication |
 | Hybrid | one backend fails | failure remains visible to caller | no silent partial-result claim |
 | Reranker | model unavailable | explicit warning and rule fallback | fallback quality is not equivalent to model reranking |
 | Eval | a mode fails in matrix | failure artifact plus non-zero exit | machine/model cold-start remains environment-dependent |

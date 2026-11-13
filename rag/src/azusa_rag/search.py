@@ -1,7 +1,7 @@
 """
 检索层对外的统一门面。
 
-单次检索的完整流程（mode 分派、过滤、来源标记、trace）都从
+单次检索的完整流程（mode 分派、来源标记、trace）都从
 ``search_records_with_sources`` 进入；CLI 入口（run_search.py / run_eval.py）、
 Agent（agent.py）和 Kaiji gateway（kaiji_gateway.py）统一通过本文件调用，
 不直接依赖下面的具体后端模块。
@@ -24,7 +24,6 @@ from time import perf_counter
 from .config import EMBEDDING_OUTPUT_PATH
 from .loaders import load_embedding_records
 from .schemas import EmbeddingRecord
-from .filters import AccessContext, MetadataFilter, record_is_visible
 from .search_common import (
     build_search_vecs,
     dot_product,
@@ -61,9 +60,6 @@ def search_records_with_sources(
     embedding_records: list[EmbeddingRecord],
     top_k: int,
     mode: str = "brute",
-    metadata_filter: MetadataFilter | None = None,
-    access_context: AccessContext | None = None,
-    filter_overfetch: int = 5,  # 有过滤条件时，先召回 top_k * filter_overfetch 这么多个候选，再应用过滤.
     trace: dict | None = None,
 ) -> tuple[list[EmbeddingRecord], list[dict] | None]:
     """
@@ -77,39 +73,23 @@ def search_records_with_sources(
     - ``hybrid``：dense + sparse 分别召回后经 RRF 融合
     - ``hybrid_rerank``：hybrid 扩大候选后再用 reranker 重排
 
-    指定 metadata_filter 或 access_context 时采用 over-fetch-then-filter：
-    先按 ``top_k * filter_overfetch`` 扩大召回，再逐条过滤，
-    因此最终结果可能少于请求的 ``top_k``。
-
     # Arguments
     - `query`: 查询文本；
     - `embedding_records`: 全部可检索记录；
     - `top_k`: 期望返回的结果数量；
     - `mode`: 检索模式，合法值见 ``modes.SEARCH_MODES``；
-    - `metadata_filter`: 可选元数据过滤条件；
-    - `access_context`: 可选访问控制上下文；
-    - `filter_overfetch`: 有过滤条件时的召回放大倍数，默认 5；
     - `trace`: 可选字典，用于记录实际后端、各阶段耗时与候选数量。
 
     # Returns
     ``(result_records, source_map)``：
-    过滤与截断后的 EmbeddingRecord 列表，以及对应的来源标记；
+    截断后的 EmbeddingRecord 列表，以及对应的来源标记；
     brute / hnsw 模式下 source_map 为 ``None``，其余模式为
     ``{"id": 记录下标, "source": 后端说明}`` 字典的列表。
     """
     total_started = perf_counter()
     if trace is not None:
         trace.update({"mode": mode, "requested_top_k": top_k, "corpus_count": len(embedding_records)})
-    # 只要指定了 metadata 过滤或访问权限上下文，后面就需要执行“先召回、再过滤”.
-    filtered_request = metadata_filter is not None or access_context is not None
-    # 保存调用方真正想要的结果数量；前面的 top_k 可能会临时扩大.
     requested_top_k = top_k
-    if filtered_request:
-        # over-fetch 倍数必须至少为 1，否则无法保证至少召回原本请求的数量.
-        if filter_overfetch < 1:
-            raise ValueError("filter_overfetch must be at least 1")
-        # 先扩大候选集，给后续过滤留下余量；同时不能超过当前语料总量.
-        top_k = min(len(embedding_records), max(top_k, top_k * filter_overfetch))
 
 
 
@@ -167,24 +147,10 @@ def search_records_with_sources(
         raise ValueError("Search mode must be bm25, brute, hnsw, hybrid,or hybrid_rerank")
 
     result_records = indices_to_records(top_k_list, embedding_records) # 搜索数据流研究 result_records = [ record_B,  record_D, ]
-    if filtered_request:
-        if trace is not None:
-            trace["pre_filter_count"] = len(result_records)
-        kept_records = []
-        kept_sources = [] if source_map is not None else None
-        for index, record in enumerate(result_records):
-            if record_is_visible(record, metadata_filter, access_context):
-                kept_records.append(record)
-                if kept_sources is not None:
-                    kept_sources.append(source_map[index])
-            if len(kept_records) == requested_top_k:
-                break
-        result_records = kept_records
-        source_map = kept_sources
     result_records = result_records[:requested_top_k]
     if trace is not None:
         trace["post_filter_count"] = len(result_records)
-        trace["filter_strategy"] = "overfetch-then-filter" if filtered_request else "none"
+        trace["filter_strategy"] = "none"
         trace["total_ms"] = (perf_counter() - total_started) * 1000
     return result_records, source_map
 

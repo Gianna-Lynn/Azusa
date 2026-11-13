@@ -2,6 +2,10 @@
 
 验收日期：2026-08-20
 
+> 历史快照：下文原分支名称、通过/失败数量均按当时记录保留，不代表当前状态。
+> 2026-11-13 起使用 main / develop / solution；原 12 项 V2 任务已完成 8 项，
+> 剩余四项 Filter/ACL 仅在 develop 留作练习。当前分支验收见 docs/branch-reorganization.md。
+
 ## 答案分支
 
 `solution/azusa-v2` 在显式使用该 worktree 的 `rag/src` 后：

@@ -1,7 +1,9 @@
 # Azusa v2 分级课程任务书
 
-参考答案：`solution/azusa-v2`
-课程主线：`main`
+参考答案：`solution`
+课程主线：`develop`；`main` 仅展示已完成能力，不包含 Filter/ACL 练习入口。
+
+L1a、L1b、L1e、L2a、L2b、L2c、L3a、L3b 已完成；剩余 L1c、L1d、L2d、L2e 仅在 develop 练习，solution 提供实现。下表保留完整学习路线。
 
 ## 学习目标与非目标
 

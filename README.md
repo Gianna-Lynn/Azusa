@@ -7,11 +7,11 @@ Azusa 是一个 Rust HNSW 向量检索与 Python RAG 实验项目，用于比较
 
 - **检索底层**：Rust HNSW 索引、向量记录与 metadata 查询、Axum HTTP 服务，以及 SIFT1M 召回率与延迟实验。
 - **RAG 链路**：Dense、BM25、RRF Hybrid、rerank、回答引用与 Search Agent trace。
-- **增量知识库**：稳定 chunk 身份、向量复用和版本化 manifest；metadata filter/ACL 的参考实现在答案分支。
+- **增量知识库**：稳定 chunk 身份、向量复用和版本化 manifest；main 的展示范围不包含 metadata filter/ACL。
 
 下面的 Rust 最小演示运行于 `main`。P0/P1 已补齐当前主线的检索证据、评测与增量 KB；
 新增工作区能力、验证与合成 Flat/HNSW 实验见[P1 记录](docs/p1-validation.md)。
-Filter 等课程能力仍需区分 [`solution/azusa-v2`](https://github.com/Gianna-Lynn/Azusa/tree/solution/azusa-v2)，分支状态见下表。
+metadata filter/ACL 的练习在 `develop`，参考答案在 `solution`，分支职责见下表。
 
 ## 最小体验
 
@@ -47,17 +47,18 @@ documents -> KB manifest -> stable chunks -> embeddings
                                       |          +-> dense / HNSW
                                       +------------> BM25
                                                     |
-                                      RRF -> rerank -> filtered evidence
+                                      RRF -> rerank -> evidence
                                                            |
                                                      Kaiji gateway
 ```
 
-上图描述完整参考实现的链路。manifest 与 chunk/embedding 产物作为持久事实来源，Rust HNSW 是可重建的内存加速层。
+上图描述 main 的展示链路。main 不提供权限过滤，不能作为多租户安全边界。manifest 与 chunk/embedding 产物作为持久事实来源，Rust HNSW 是可重建的内存加速层。
 
 | 分支 | 用途 |
 |---|---|
-| `main` | 开发主线；当前检索、评测与增量 KB 已实现，Filter/ACL 仍有课程 TODO |
-| `solution/azusa-v2` | Knowledge Base 增量同步、metadata filter、最小 ACL 与 Benchmark Lab 等完整参考实现 |
+| `main` | 对外展示；保留已完成的检索、评测、增量 KB、Gateway 与 Agent，无施工占位 |
+| `develop` | 人的开发与学习；保留已完成成果与 Filter/ACL 四项练习 |
+| `solution` | Agent 参考答案；同步公共改进并补全 Filter/ACL |
 
 Python RAG 的模型、数据和安装要求见 [RAG 指南](rag/RAG_README.md)。默认模型配置使用本机路径和 CUDA，
 运行前需要按自己的环境核对；`kb-sync` 需要可用的本地编码模型，离线契约测试使用向量替身。
@@ -79,5 +80,7 @@ Python RAG 的模型、数据和安装要求见 [RAG 指南](rag/RAG_README.md)�
 - 小型回归集用于检查工程行为；本地小模型仍可能产生错误答案或遗漏引用。
 
 Azusa（あずさ，梓号）的名字来自 JR 东日本中央本线特急列车；Kaiji（かいじ，甲斐路号）是同线的另一班列车。
+
+分支工作流：[分支说明](docs/future_learning_plan.md)。完成并理解的功能从 develop 验收后进入 main；参考答案不整体合入 main。
 
 开发与学习记录：[课程任务书](rag/docs/azusa_v2_assignment.md) · [要求与测试追踪](rag/docs/azusa_v2_traceability.md)。

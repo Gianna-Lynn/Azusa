@@ -23,7 +23,7 @@ P0-B 已在当前主线实现 L1e、L3a、L3b，正式评测按请求 k 计算 I
 旧实现仍是被审计对象，不能用其“按返回长度计算分母”的行为替代当前契约。
 P1 已进一步实现当前主线 L1a、L1b、L2a、L2b、L2c；新增交付测试覆盖编码身份、
 权限元数据刷新、损坏产物拒绝和空库删除。manifest v2 与单写者写入边界见
-`docs/knowledge_base_v1.md`。Filter/ACL TODO 不在本轮完成范围。
+`docs/knowledge_base_v1.md`。Filter/ACL 四项练习留在 develop，完整实现在 solution；main 不导出这些接口。表内 Filter/ACL 的实现与测试位置仅适用于 develop / solution。
 
 答案分支必须全部通过；课程分支在未实现时必须逐项精确落到对应 TODO，而不是被导入错误、
 缺失 fixture 或后续任务提前遮挡。

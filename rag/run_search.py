@@ -18,7 +18,6 @@ from azusa_rag.config import EMBEDDING_OUTPUT_PATH, LATEST_SEARCH_RUN_DIR, SEARC
 from azusa_rag.loaders import load_embedding_records
 from azusa_rag.modes import SEARCH_MODES
 from azusa_rag.schemas import EmbeddingRecord
-from azusa_rag.filters import AccessContext, MetadataFilter
 from azusa_rag.search import (
     get_query,
     search_records_with_sources,
@@ -51,8 +50,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to the embedding jsonl used for retrieval. Defaults to output/artifacts/embedding.jsonl.",
     )
     parser.add_argument("--with-answer", action="store_true", help="Whether to run the answerer on top of search results.")
-    parser.add_argument("--metadata-filter", help="JSON object with tenant/department/type/language/visibility/tags_any filters.")
-    parser.add_argument("--access-context", help="JSON object with tenant_id, departments and allow_private ACL fields.")
     query_group = parser.add_mutually_exclusive_group()
     query_group.add_argument("--query-text", help="Use an explicit query string instead of the default query file.")
     query_group.add_argument(
@@ -197,8 +194,6 @@ def run_search_result(
     mode: str,                  # 检索模式, 目前支持 "brute" / "hnsw"
     top_k: int,                 # 最终返回的 top-k 结果数, 也就是用户最关心的命中记录数
     with_answer: bool = False,  # 是否在搜索结果上再跑一次 answerer, 生成最终答案文本
-    metadata_filter: MetadataFilter | None = None,  # 可选的元数据过滤器, 用于筛掉不符合条件的记录
-    access_context: AccessContext | None = None,    # 可选的访问控制上下文, 用于过滤掉用户无权访问的记录
 ) -> dict:
     """
     对单条 query 执行一次完整搜索，并返回统一结果字典。
@@ -209,8 +204,6 @@ def run_search_result(
         embedding_records=embedding_records,
         top_k=top_k,
         mode=mode,
-        metadata_filter=metadata_filter,
-        access_context=access_context,
         trace=retrieval_trace,
     )
 
@@ -246,8 +239,6 @@ def main() -> None:
         mode=args.mode,
         top_k=args.top_k,
         with_answer=args.with_answer,
-        metadata_filter=MetadataFilter.from_dict(json.loads(args.metadata_filter)) if args.metadata_filter else None,
-        access_context=AccessContext.from_dict(json.loads(args.access_context)) if args.access_context else None,
     )
 
     print_results(result_dict)

@@ -2,7 +2,7 @@
 
 P1 已在 `main` 实现确定性身份、增量同步和空库删除。知识库接口沿用 v1 名称，
 新写入的 manifest 为 **schema_version=2**；块和向量 JSONL 仍兼容原有读取入口。
-旧答案实现是参考对象，不能替代本轮编码身份与元数据刷新约束。验证入口见
+solution 同步当前编码身份与元数据刷新约束；main 不包含 Filter/ACL。验证入口见
 [P1 验证记录](p1-validation.md)。
 
 ## 增量与写入边界
@@ -39,7 +39,9 @@ Optional `azusa_metadata.json` in the source directory maps relative source path
 to provide `tenant_id`, `department`, `document_type`, `language`, `visibility`, and `tags` without modifying
 the source document.
 
-## Filter and ACL semantics
+## Filter and ACL semantics（仅 solution；develop 为练习）
+
+main 保留 metadata 数据，但不执行权限过滤，也不导出过滤入口。以下描述 solution 的契约。
 
 `MetadataFilter` supports tenant, department, document type, language, visibility, and tag matching.
 `AccessContext` separately enforces tenant isolation and public/department/private visibility. Unknown

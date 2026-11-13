@@ -52,9 +52,5 @@ solution 实测：170 passed，无失败或跳过。除了原有 148 项契约�
 执行 rollback.ps1，再逐项比较原四个本地分支的名称与完整提交 ID，全部一致。
 演练没有修改真实仓库的分支；本地备份也不会改变远端状态。
 
-develop 实测：143 passed / 5 failed；JUnit 中五个失败均属于 `test_filters.py`，
-分别精确终止于 L1c、L1d、L2d、L2e 的 `NotImplementedError`，没有额外失败或跳过。
-四个练习文件逐字恢复自人的提交 `3779d11`，已完成的其余源码保持不变。
-
 真实模型质量、GPU 性能和历史大规模实验不属于此次分支调整的复测范围；不把 fixture、
 向量替身或历史数字当作新测模型成绩。Python 保留已有 SWIG 弃用警告。

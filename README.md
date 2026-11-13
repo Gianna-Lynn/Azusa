@@ -1,5 +1,7 @@
 # Azusa
 
+当前分支：`develop`。这里保留人的开发与 Filter/ACL 四项练习；对外演示请使用 `main`，参考答案使用 `solution`。
+
 Azusa 是一个 Rust HNSW 向量检索与 Python RAG 实验项目，用于比较检索策略并追踪回答证据。
 [Kaiji](https://github.com/Gianna-Lynn/Kaiji) 在其上通过 HTTP/Tool Adapter 实现单 Agent 应用。
 

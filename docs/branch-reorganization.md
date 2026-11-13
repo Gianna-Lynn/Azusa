@@ -42,5 +42,9 @@ JSON/CSV/Markdown，输出位于 `rag/.cache/branch-reorg-main-smoke/`。
 develop 应保留四项练习产生的五个精确失败；solution 必须全部通过，不能使用跳过标记
 隐藏未完成任务。各分支的实际结果在对应分支补录。
 
+develop 实测：143 passed / 5 failed；JUnit 中五个失败均属于 `test_filters.py`，
+分别精确终止于 L1c、L1d、L2d、L2e 的 `NotImplementedError`，没有额外失败或跳过。
+四个练习文件逐字恢复自人的提交 `3779d11`，已完成的其余源码保持不变。
+
 真实模型质量、GPU 性能和历史大规模实验不属于此次分支调整的复测范围；不把 fixture、
 向量替身或历史数字当作新测模型成绩。Python 保留已有 SWIG 弃用警告。

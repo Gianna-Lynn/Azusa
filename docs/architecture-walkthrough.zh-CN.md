@@ -46,7 +46,7 @@ hybrid_rerank 在扩大候选、RRF 融合后重排。brute/hnsw/bm25 可以独�
 
 ## 快速复读顺序
 
-1. `rag/run_search.py:run_search_result`：看清检索和可选回答的总入口。
+1. `rag/src/azusa_rag/cli/search.py:run_search_result`：原 `rag/run_search.py` 的入口搬到这里，检索和可选回答的函数保持原名。
 2. `rag/src/azusa_rag/search.py:search_records_with_sources`：看模式分派与结果还原。
 3. `search_hybrid.py` → `search_sparse.py:rerank_candidates` → `reranker.py`：复习融合、重排、回退。
 4. `search_hnsw.py` → `src/bin/azusa_server.rs` → `src/index/hnsw_impl/search.rs`：跟踪一次 HTTP 向量查询；需要时回看 `build.rs` 建图。

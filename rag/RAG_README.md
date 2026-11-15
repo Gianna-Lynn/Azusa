@@ -35,6 +35,18 @@ cargo run --bin azusa_server
 
 统一入口是 `run.py`：
 
+命令实现已集中到 `src/azusa_rag/cli/`，根目录不再提供 `run_search.py` 等独立脚本。
+旧命令改用 `python run.py search ...`；Kaiji 网关改用 `python run.py gateway ...`。
+检索源码和阅读顺序保持不变，只有请求入口的位置更新为：
+
+```text
+run.py -> cli/search.py:run_search_result -> search.py:search_records_with_sources
+       -> search_hybrid.py / search_hnsw.py / search_sparse.py -> 原有重排与回答
+```
+
+`cli/` 暂时保留原脚本的函数与编排，不在这轮进一步拆分评测或工作流。
+源码指纹会递归记录包内代码；历史实验归档及其中旧路径保持原样。
+
 ```powershell
 python run.py <command> [args]
 ```
@@ -43,6 +55,7 @@ python run.py <command> [args]
 python run.py chunk
 python run.py embed
 python run.py kb-sync
+python run.py gateway --port 3010
 python run.py search --mode brute --top-k 3
 python run.py search --mode hnsw --top-k 3
 python run.py search --mode hybrid_rerank --top-k 3 --with-answer

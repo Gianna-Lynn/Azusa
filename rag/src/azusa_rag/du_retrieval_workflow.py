@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from datetime import datetime
 from pathlib import Path
 from urllib.error import URLError
@@ -42,15 +41,8 @@ from .embed_main import build_embedding_artifacts
 from .loaders import load_embedding_records
 from .search_hnsw import get_json
 
-# 这里显式把 rag 项目根目录补进 sys.path，
-# 是为了兼容当前仍然存在于项目根目录下的 run_eval.py / run_search.py。
-# 这样 workflow 既能通过 run_du_retrieval_workflow.py 运行，
-# 也不容易被“只配置了 src 到 PYTHONPATH”这件事绊住。
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.append(str(PROJECT_ROOT))
-
-from run_eval import load_eval_cases, run_eval_for_mode
-from run_search import run_search_result
+from .cli.eval import load_eval_cases, run_eval_for_mode
+from .cli.search import run_search_result
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -369,8 +361,8 @@ def print_terminal_summary(summary: dict, summary_path: Path, report_path: Path)
         print(f"  {hybrid_result['answer']}")
 
 
-def main() -> None:
-    args = build_parser().parse_args()
+def main(argv: list[str] | None = None) -> None:
+    args = build_parser().parse_args(argv)
 
     output_dir = (
         DU_RETRIEVAL_RUNS_DIR / args.output_prefix

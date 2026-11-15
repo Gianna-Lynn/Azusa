@@ -51,8 +51,9 @@ def source_identity() -> dict:
     只保存文件哈希，不将工作区 diff 正文或 Git 配置写入报告。
     """
     rag_root = config.PROJECT_ROOT
-    files = sorted((rag_root / "src" / "azusa_rag").glob("*.py"))
-    files += sorted(rag_root.glob("run*.py")) + [rag_root / "bootstrap.py"]
+    # 递归包含 cli 等子包，迁移入口后仍记录全部 Python 执行源码。
+    files = sorted((rag_root / "src" / "azusa_rag").rglob("*.py"))
+    files += [rag_root / "run.py"]
     source_files = [file_identity(path) for path in files]
     result = {"git_commit": None, "git_dirty": None, "files": source_files}
     try:

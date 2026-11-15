@@ -3,7 +3,7 @@
 
 目标：
 1. 把越来越多的 ``run_*.py`` 收拢到一个入口下
-2. 保留旧脚本兼容性，不强制立刻迁移
+2. 从包内 cli 模块加载命令，不再依赖根目录 run_*.py
 3. 让 README 只需要教一套命令形态：``python run.py <command> ...``
 """
 
@@ -12,13 +12,12 @@ from __future__ import annotations
 import argparse
 import importlib
 import sys
-from contextlib import contextmanager
+from pathlib import Path
 from dataclasses import dataclass
-from typing import Iterator
-
-from bootstrap import ensure_src_path
-
-ensure_src_path()
+# 仅独立脚本需要定位 src；包内命令不再修改导入路径。
+src_path = str(Path(__file__).resolve().parent / "src")
+if src_path not in sys.path:
+    sys.path.insert(0, src_path)
 
 
 @dataclass(frozen=True)
@@ -29,35 +28,23 @@ class CommandSpec:
 
 
 COMMAND_SPECS = [
-    CommandSpec("chunk", "run_main", "Build chunks from data/raw into output/artifacts/chunks.jsonl."),
-    CommandSpec("embed", "run_embed", "Build embeddings from chunks into output/artifacts/embedding.jsonl."),
-    CommandSpec("kb-sync", "run_kb_sync", "Incrementally synchronize multi-format source documents and embeddings."),
-    CommandSpec("search", "run_search", "Run one retrieval query and write output/search_runs/latest/."),
-    CommandSpec("agent", "run_agent", "Run Search Agent v0 and write output/search_runs/latest/."),
-    CommandSpec("agent-eval", "run_agent_eval", "Run the Stage 3 Agent sample set and save structured traces."),
-    CommandSpec("eval", "run_eval", "Run retrieval eval into a new output/eval_runs/runs/ directory."),
-    CommandSpec("workflow", "run_workflow", "Run the consolidated workflow and write output/eval_runs/latest/."),
-    CommandSpec("import-hf-eval", "run_import_hf_eval", "Import a Hugging Face QA sample snapshot."),
-    CommandSpec("import-du-retrieval", "run_import_du_retrieval", "Convert a DuRetrieval snapshot into passages/eval jsonl."),
-    CommandSpec("download-du-retrieval", "run_download_du_retrieval", "Download a local DuRetrieval sample snapshot."),
-    CommandSpec("du-retrieval-workflow", "run_du_retrieval_workflow", "Run the DuRetrieval end-to-end workflow."),
-    CommandSpec("benchmark-lab", "run_benchmark_lab", "Run retrieval mode/top-k/chunk-artifact experiment matrices."),
+    CommandSpec("gateway", "azusa_rag.cli.gateway", "Serve the Kaiji semantic retrieval HTTP gateway."),
+    CommandSpec("chunk", "azusa_rag.cli.chunk", "Build chunks from data/raw into output/artifacts/chunks.jsonl."),
+    CommandSpec("embed", "azusa_rag.cli.embed", "Build embeddings from chunks into output/artifacts/embedding.jsonl."),
+    CommandSpec("kb-sync", "azusa_rag.cli.kb_sync", "Incrementally synchronize multi-format source documents and embeddings."),
+    CommandSpec("search", "azusa_rag.cli.search", "Run one retrieval query and write output/search_runs/latest/."),
+    CommandSpec("agent", "azusa_rag.cli.agent", "Run Search Agent v0 and write output/search_runs/latest/."),
+    CommandSpec("agent-eval", "azusa_rag.cli.agent_eval", "Run the Stage 3 Agent sample set and save structured traces."),
+    CommandSpec("eval", "azusa_rag.cli.eval", "Run retrieval eval into a new output/eval_runs/runs/ directory."),
+    CommandSpec("workflow", "azusa_rag.cli.workflow", "Run the consolidated workflow and write output/eval_runs/latest/."),
+    CommandSpec("import-hf-eval", "azusa_rag.cli.import_hf_eval", "Import a Hugging Face QA sample snapshot."),
+    CommandSpec("import-du-retrieval", "azusa_rag.cli.import_du_retrieval", "Convert a DuRetrieval snapshot into passages/eval jsonl."),
+    CommandSpec("download-du-retrieval", "azusa_rag.cli.download_du_retrieval", "Download a local DuRetrieval sample snapshot."),
+    CommandSpec("du-retrieval-workflow", "azusa_rag.cli.du_retrieval_workflow", "Run the DuRetrieval end-to-end workflow."),
+    CommandSpec("benchmark-lab", "azusa_rag.cli.benchmark_lab", "Run retrieval mode/top-k/chunk-artifact experiment matrices."),
 ]
 
 COMMAND_BY_NAME = {spec.name: spec for spec in COMMAND_SPECS}
-
-
-@contextmanager
-def patched_argv(command_name: str, argv: list[str]) -> Iterator[None]:
-    """
-    让既有入口脚本在不改签名的情况下，也能被统一入口安全转发。
-    """
-    original_argv = sys.argv[:]
-    sys.argv = [command_name, *argv]
-    try:
-        yield
-    finally:
-        sys.argv = original_argv
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -80,8 +67,7 @@ def dispatch_command(command_name: str, forwarded_argv: list[str]) -> None:
     module = importlib.import_module(spec.module_name)
     command_main = getattr(module, "main")
 
-    with patched_argv(command_name, forwarded_argv):
-        command_main()
+    command_main(forwarded_argv)
 
 
 def main(argv: list[str] | None = None) -> None:

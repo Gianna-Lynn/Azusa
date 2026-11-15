@@ -98,13 +98,14 @@ pip install -e .
 python run.py --help
 ```
 
-`rag/run.py` 是首选统一入口，同时保留旧的 `run_*.py` 脚本以兼容历史工作流。当前子命令包括：
+`rag/run.py` 是统一入口，命令模块集中在 `rag/src/azusa_rag/cli/`；旧的根目录 `run_*.py` 已迁入包内，不再作为独立脚本运行。检索核心模块位置保持不变。当前子命令包括：
 
 ```powershell
 # 基础产物
 python run.py chunk
 python run.py embed
 python run.py kb-sync
+python run.py gateway --port 3010
 
 # 单次检索与 Agent
 python run.py search --mode brute --top-k 3 --query-text "your query"

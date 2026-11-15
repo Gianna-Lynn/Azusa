@@ -6,7 +6,7 @@ import csv
 import json
 from pathlib import Path
 
-import run_benchmark_lab as lab
+from azusa_rag.cli import benchmark_lab as lab
 import pytest
 
 

@@ -205,8 +205,8 @@ def write_jsonl(output_path, records):
             f.write("\n")
 
 
-def main():
-    args = build_parser().parse_args()
+def main(argv: list[str] | None = None) -> None:
+    args = build_parser().parse_args(argv)
 
     input_path = Path(args.input_path)
 

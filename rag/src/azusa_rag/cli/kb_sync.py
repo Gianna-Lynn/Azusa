@@ -6,10 +6,6 @@ import argparse
 import json
 from pathlib import Path
 
-from bootstrap import ensure_src_path
-
-ensure_src_path()
-
 from azusa_rag.config import (
     CHUNK_OUTPUT_PATH,
     CHUNK_OVERLAP,
@@ -38,9 +34,9 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     """运行同步并输出变更计数；非法输入或损坏旧产物直接以非零退出。"""
-    args = build_parser().parse_args()
+    args = build_parser().parse_args(argv)
     documents = load_document_records(Path(args.source_dir), allow_empty=args.allow_empty)
     report = sync_knowledge_base(
         documents,

@@ -3,7 +3,7 @@
 import unittest
 from pathlib import Path
 
-from run_agent_eval import (
+from azusa_rag.cli.agent_eval import (
     evaluate_agent_case,
     evaluate_citations,
     evaluate_retrieved_evidence,

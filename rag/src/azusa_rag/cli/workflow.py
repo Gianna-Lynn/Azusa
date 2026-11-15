@@ -17,10 +17,6 @@ from datetime import datetime
 from pathlib import Path
 from time import perf_counter
 
-from bootstrap import ensure_src_path
-
-ensure_src_path()
-
 from azusa_rag.config import (
     EMBEDDING_OUTPUT_PATH,
     EVAL_RUNS_DIR,
@@ -33,8 +29,8 @@ from azusa_rag.hf_dataset_import import import_hf_squad_sample
 from azusa_rag.loaders import load_embedding_records
 from azusa_rag.main import main as chunk_main
 from azusa_rag.modes import MODE_METADATA, get_mode_order_key
-from run_eval import EVAL_MODES, load_eval_cases, run_eval_for_mode
-from run_search import run_search_result
+from azusa_rag.cli.eval import EVAL_MODES, load_eval_cases, run_eval_for_mode
+from azusa_rag.cli.search import run_search_result
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1124,7 +1120,7 @@ def print_terminal_summary(
         print()
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     """
     workflow 脚本主入口。
 
@@ -1135,7 +1131,7 @@ def main() -> None:
     4. 在终端打印精简摘要
     """
     parser = build_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     summary = build_workflow_summary(args)
     summary_path, report_path, badcase_path = write_output_files(

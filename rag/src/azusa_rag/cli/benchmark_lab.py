@@ -7,15 +7,11 @@ import csv
 import json
 from pathlib import Path
 
-from bootstrap import ensure_src_path
-
-ensure_src_path()
-
 from azusa_rag.config import EMBEDDING_OUTPUT_PATH, EVAL_RUNS_DIR, PROJECT_ROOT
 from azusa_rag.evaluation_provenance import experiment_identity, file_identity, new_run_directory
 from azusa_rag.loaders import load_embedding_records
 from azusa_rag.modes import MODE_DISPLAY_ORDER
-from run_eval import load_eval_cases, run_eval_for_mode
+from azusa_rag.cli.eval import load_eval_cases, run_eval_for_mode
 
 CSV_FIELDS = [
     "variant", "mode", "top_k", "query_count", "hit_at_k", "recall_at_k", "mrr",
@@ -186,10 +182,10 @@ def write_outputs(output_dir: Path, report: dict) -> None:
         output.write("\n".join(lines) + "\n")
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     """执行矩阵并输出实际目录；任何失败单元格导致非零退出，仍保存完整失败报告。"""
     parser = build_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.smoke and args.variant:
         parser.error("--smoke and --variant cannot be combined")
     variants = args.variant or [

@@ -17,3 +17,4 @@ rag/data/eval/*
 **/.env
 **/.env.*
 !**/.env.example
+local-experiments/

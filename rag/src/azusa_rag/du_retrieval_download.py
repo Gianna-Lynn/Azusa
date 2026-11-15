@@ -186,8 +186,8 @@ def write_snapshot(output_path: Path, snapshot: dict) -> None:
     )
 
 
-def main() -> None:
-    args = build_parser().parse_args()
+def main(argv: list[str] | None = None) -> None:
+    args = build_parser().parse_args(argv)
 
     # 这里先分别抓取 corpus / queries / qrels 三份线上数据，
     # 再在本地裁成 importer 能直接消费的 json 结构。

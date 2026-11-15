@@ -7,10 +7,6 @@ import json
 import tempfile
 from pathlib import Path
 
-from bootstrap import ensure_src_path
-
-ensure_src_path()
-
 from azusa_rag.agent import run_search_agent
 from azusa_rag.config import EMBEDDING_OUTPUT_PATH, LATEST_SEARCH_RUN_DIR, SEARCH_RUNS_DIR
 from azusa_rag.loaders import load_embedding_records
@@ -125,9 +121,9 @@ def write_agent_outputs(
     return latest_path, run_copy_path
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     query = load_query_text(args)
     embedding_records = load_embedding_records(Path(args.embedding_path))

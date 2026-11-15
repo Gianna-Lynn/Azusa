@@ -37,7 +37,7 @@ Set-Location rag
 $py = 'D:\Chuo_Data\conda_envs\ChuoEnv\python.exe'
 
 & $py -m pytest tests/test_kaiji_gateway.py
-& $py run_kaiji_gateway.py --port 3010
+& $py run.py gateway --port 3010
 ```
 
 默认加载 `output/artifacts/embedding.jsonl`。`bm25` 不需要 GPU 或 Rust 服务；

@@ -43,7 +43,7 @@ D:\Chuo_Data\conda_envs\ChuoEnv\python.exe run.py agent --mode hybrid_rerank --t
 output/search_runs/latest/search_agent_v0_<mode>.json
 ```
 
-如果当前 Python 进程没有权限写入仓库输出目录，`run_agent.py` 会 fallback 到系统临时目录，并在终端打印实际 `saved to` 路径。
+如果当前 Python 进程没有权限写入仓库输出目录，`src/azusa_rag/cli/agent.py` 会 fallback 到系统临时目录，并在终端打印实际 `saved to` 路径。
 
 ## JSON Fields
 

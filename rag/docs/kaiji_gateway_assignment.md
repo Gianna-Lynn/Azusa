@@ -57,7 +57,7 @@ HTTP 503。
 也能复现课程，仓库跟踪了最小证据集：
 
 ```powershell
-python run_kaiji_gateway.py --port 38117 --embedding-path tests/fixtures/kaiji_gateway_embedding.jsonl
+python run.py gateway --port 38117 --embedding-path tests/fixtures/kaiji_gateway_embedding.jsonl
 ```
 
 它只用于验证 `stromules → 命中含 1962 的证据 → 按 chunk_id 取回同一正文` 这条 HTTP

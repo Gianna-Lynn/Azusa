@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import pytest
 
-from run_eval import evaluate_case, normalized_discounted_cumulative_gain, summarize_case_results
+from azusa_rag.cli.eval import evaluate_case, normalized_discounted_cumulative_gain, summarize_case_results
 
 
 def test_ndcg_rewards_earlier_relevant_results() -> None:

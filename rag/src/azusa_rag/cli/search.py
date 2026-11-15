@@ -10,10 +10,6 @@ import argparse
 import json
 from pathlib import Path
 
-from bootstrap import ensure_src_path
-
-ensure_src_path()
-
 from azusa_rag.config import EMBEDDING_OUTPUT_PATH, LATEST_SEARCH_RUN_DIR, SEARCH_RUNS_DIR
 from azusa_rag.loaders import load_embedding_records
 from azusa_rag.modes import SEARCH_MODES
@@ -233,9 +229,9 @@ def run_search_result(
     )
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     query = load_query_text(args)
     # 这里允许显式切换 embedding 输入，方便我们单独验证 DuRetrieval 这类新链路。

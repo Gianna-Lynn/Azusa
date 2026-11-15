@@ -280,7 +280,7 @@ def import_hf_squad_sample(
     }
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     """
     解析命令行参数并启动 Hugging Face 样本导入流程.
     """
@@ -312,7 +312,7 @@ def main() -> None:
     )
     parser.add_argument("--query-dir", default=None)
     parser.add_argument("--query-limit", type=int, default=3)
-    args = parser.parse_args()  # 解析命令行参数, 这样用户在命令行调用这个脚本时就可以指定要导入哪个 dataset/config/split 的数据, 从哪个 offset 开始, 导入多少条, 以及 raw txt 和 eval jsonl 的保存位置.
+    args = parser.parse_args(argv)  # 解析命令行参数, 这样用户在命令行调用这个脚本时就可以指定要导入哪个 dataset/config/split 的数据, 从哪个 offset 开始, 导入多少条, 以及 raw txt 和 eval jsonl 的保存位置.
 
     if args.raw_dir is not None or args.eval_path is not None or args.query_dir is not None:
         raw_dir = Path(args.raw_dir) if args.raw_dir is not None else RAW_DATA_DIR

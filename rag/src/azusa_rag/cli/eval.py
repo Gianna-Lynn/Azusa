@@ -16,10 +16,6 @@ from pathlib import Path
 from time import perf_counter
 from collections import Counter
 
-from bootstrap import ensure_src_path
-
-ensure_src_path()
-
 from azusa_rag.config import EMBEDDING_OUTPUT_PATH, EVAL_RUNS_DIR, PROJECT_ROOT
 from azusa_rag.loaders import load_embedding_records
 from azusa_rag.modes import SEARCH_MODES
@@ -389,10 +385,10 @@ def write_eval_outputs(
     return result_path, run_copy_path
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     """执行所有指定模式，保留失败清单；任何失败均以非零状态结束。"""
     parser = build_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.top_k < 1:
         parser.error("--top-k must be positive")
 

@@ -18,10 +18,6 @@ import tempfile
 from pathlib import Path
 from time import perf_counter
 
-from bootstrap import ensure_src_path
-
-ensure_src_path()
-
 from azusa_rag.agent import run_search_agent
 from azusa_rag.config import EMBEDDING_OUTPUT_PATH, LATEST_EVAL_RUN_DIR, PROJECT_ROOT
 from azusa_rag.loaders import load_embedding_records
@@ -296,9 +292,9 @@ def write_agent_eval_summary(output_path: Path, summary: dict) -> Path:
         return fallback_path
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     """加载样例和 embedding，逐题运行 Agent，然后汇总并保存结果。"""
-    args = build_parser().parse_args()
+    args = build_parser().parse_args(argv)
     cases = load_agent_eval_cases(Path(args.eval_path))
     embedding_records = load_embedding_records(Path(args.embedding_path))
 

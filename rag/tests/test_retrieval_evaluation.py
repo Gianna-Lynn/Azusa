@@ -9,8 +9,8 @@ import sys
 
 import pytest
 
-import run_benchmark_lab as lab
-import run_eval as evaluation
+from azusa_rag.cli import benchmark_lab as lab
+from azusa_rag.cli import eval as evaluation
 from azusa_rag.loaders import load_embedding_records
 from azusa_rag import search_sparse as sparse
 from azusa_rag import search_hybrid as hybrid
